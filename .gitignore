@@ -3,11 +3,9 @@ data/*.gpkg
 data/*.geojson
 data/*.tif
 data/*.jpg
-
-# Outputs
-thumbs/
-georef/
-cogs/
+data/*.csv
+data/raw/
+data/stac/
 
 # R
 .Rhistory
