@@ -1,0 +1,19 @@
+# Data
+data/*.gpkg
+data/*.geojson
+data/*.tif
+data/*.jpg
+
+# Outputs
+thumbs/
+georef/
+cogs/
+
+# R
+.Rhistory
+.RData
+.Rproj.user
+
+# Secrets
+.env
+*.tfvars
