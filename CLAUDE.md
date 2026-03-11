@@ -29,12 +29,44 @@ Scaffolded from [fly](https://github.com/NewGraphEnvironment/fly) (v0.1.3).
 
 ### Pipeline (issues #1–#6)
 
-1. Fetch centroids + thumbnails per decade
+1. Fetch centroids + thumbnails per year
 2. Georef to footprints
 3. Convert to COGs
 4. Upload to S3
 5. Register STAC items on images.a11s.one
 6. Init CLAUDE.md
+
+### Directory conventions
+
+Asset type (`thumbs`, `scans`) carried through every stage:
+
+```
+data/raw/thumbs/{year}/*.jpg              — downloaded thumbnails
+data/raw/georef/thumbs/{year}/*.tif       — georeferenced GeoTIFFs
+data/stac/bc-airphoto/thumbs/{year}/*.tif — COGs (synced to S3)
+
+data/raw/scans/{year}/*.tif               — downloaded full-res scans (future)
+data/raw/georef/scans/{year}/*.tif        — georeferenced full-res (future)
+data/stac/bc-airphoto/scans/{year}/*.tif  — COGs (synced to S3, future)
+```
+
+One STAC collection (`bc-airphoto`), one item per physical photo (`airp_id`), multiple assets:
+
+```json
+{
+  "id": "695106",
+  "assets": {
+    "thumbnail": { "href": ".../thumbs/1968/bc5281_084_thumb.tif" },
+    "visual":    { "href": ".../scans/1968/bc5281_084.tif" }
+  }
+}
+```
+
+### Caching strategy
+
+- `data/centroids_raw.parquet` — cached BC Data Catalogue query (gitignored, re-query with `force_refresh = TRUE`)
+- `fly_filter()` re-runs fresh each time (footprint estimates may change)
+- `fly_fetch(overwrite = FALSE)` skips existing files on disk
 
 <\!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 

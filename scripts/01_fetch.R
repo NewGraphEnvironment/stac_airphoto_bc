@@ -67,8 +67,11 @@ message(
 )
 
 # --- Fetch thumbnails partitioned by year --------------------------------
-# Raw JPGs go to data/raw/thumbs/{year}/.
-# Final COGs go to data/stac/bc-airphoto/thumbs/{year}/ at the COG step.
+# Path convention carries asset type at every stage:
+#   data/raw/thumbs/{year}/*.jpg          — downloaded thumbnails
+#   data/raw/georef/thumbs/{year}/*.tif   — georeferenced GeoTIFFs
+#   data/stac/bc-airphoto/thumbs/{year}/*.tif — COGs for S3
+# Full-res scans follow the same pattern with "scans" instead of "thumbs".
 # fly_fetch(overwrite = FALSE) skips existing files on disk.
 
 years <- sort(unique(centroids$year))
