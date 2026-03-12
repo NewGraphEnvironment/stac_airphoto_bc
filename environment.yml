@@ -1,0 +1,15 @@
+name: stac-airphoto-bc
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.9
+  - pip
+  - pip:
+      - pystac>=1.12.0
+      - rio-stac>=0.11.0
+      - rasterio>=1.4.0
+      - shapely
+      - pyarrow
+      - tqdm
+      - jsonschema
