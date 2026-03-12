@@ -204,7 +204,8 @@ else:
 
 collection = pystac.Collection(
     id=COLLECTION_ID,
-    description="Historical aerial photographs of British Columbia, georeferenced thumbnails and full-resolution scans.",
+    title="Historical Aerial Photographs of British Columbia",
+    description="Georeferenced thumbnails of historical aerial photographs of British Columbia.",
     extent=pystac.Extent(spatial=spatial_extent, temporal=temporal_extent),
     license="proprietary",
 )
