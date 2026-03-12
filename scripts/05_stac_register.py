@@ -155,6 +155,15 @@ for cog_path in thumb_cogs:
         if val is not None:
             properties[f"airphoto:{key}"] = val
 
+    # Title: airp_id — roll_frame — date (for display in QGIS / STAC browsers)
+    roll = meta.get("film_roll", "")
+    frame = meta.get("frame_number", "")
+    roll_frame = f"{roll}_{frame}" if roll and frame else stem
+    date_str = str(meta["photo_date"]) if meta["photo_date"] else str(meta.get("photo_year", ""))
+    title = f"{airp_id} — {roll_frame} — {date_str}"
+
+    properties["title"] = title
+
     item = pystac.Item(
         id=str(airp_id),
         geometry=geom,

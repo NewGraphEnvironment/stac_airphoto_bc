@@ -48,3 +48,11 @@ message(
   sum(results$skipped), " skipped, ",
   sum(!results$success), " failed"
 )
+
+# --- Embed metadata tags via Python/rasterio ------------------------------
+# terra can't persist custom GDAL metadata tags; rasterio can.
+# Tags: airp_id, photo_date, scale, film_roll, frame_number, focal_length, flying_height.
+
+message("\nEmbedding metadata tags...")
+exit_code <- system("conda run -n stac-airphoto-bc python scripts/03_cog_tag.py")
+if (exit_code != 0) warning("Metadata tagging failed")
