@@ -58,7 +58,7 @@ for cog in cog_files:
         skipped += 1
         continue
 
-    # Check if already tagged (with FILENAME — new field)
+    # Check if already tagged (with FILENAME — most recent field)
     with rasterio.open(cog) as ds:
         existing = ds.tags()
     if "FILENAME" in existing:
