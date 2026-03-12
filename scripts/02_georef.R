@@ -38,7 +38,8 @@ message(nrow(fetch_result), " thumbnails on disk")
 
 # --- Georeference per year ----------------------------------------------
 # Output: data/raw/georef/thumbs/{year}/*.tif (BC Albers 3005)
-# fly_thumb_georef(overwrite = FALSE) skips existing files.
+# fly_georef(overwrite = FALSE) skips existing files.
+# rotation = "auto" derives bearing from consecutive centroids on same roll.
 
 years <- sort(unique(centroids$year[centroids$airp_id %in% fetch_result$airp_id]))
 
@@ -50,9 +51,10 @@ georef_results <- purrr::map_dfr(years, function(yr) {
   if (nrow(fr) == 0) return(tibble::tibble())
 
   message("Georeferencing ", nrow(fr), " thumbnails for ", yr)
-  fly::fly_thumb_georef(
+  fly::fly_georef(
     fr, ph,
-    dest_dir = file.path("data", "raw", "georef", "thumbs", yr)
+    dest_dir = file.path("data", "raw", "georef", "thumbs", yr),
+    rotation = "auto"
   )
 })
 

@@ -4,6 +4,8 @@ data/*.geojson
 data/*.tif
 data/*.jpg
 data/*.csv
+data/*.rds
+data/*.parquet
 data/raw/
 data/stac/
 
@@ -11,6 +13,14 @@ data/stac/
 .Rhistory
 .RData
 .Rproj.user
+README.html
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
 
 # Secrets
 .env

@@ -5,36 +5,60 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 ## Repository Context
 
 **Repository:** NewGraphEnvironment/stac_airphoto_bc
-**Primary Language:** R
+**Primary Language:** R + Python (conda env `stac-airphoto-bc`)
 **SRED:** NewGraphEnvironment/sred-2025-2026#22
+**Live:** [images.a11s.one/collections/stac-airphoto-bc](https://images.a11s.one/collections/stac-airphoto-bc)
+**Pages:** [newgraphenvironment.com/stac_airphoto_bc](https://www.newgraphenvironment.com/stac_airphoto_bc/)
+
+## Current State
+
+- 9,741 georeferenced thumbnail COGs covering Neexdzii Kwa watershed, 1963–2019
+- 30.3 GiB on S3 (`s3://stac-airphoto-bc`)
+- Registered on pgstac via `images.a11s.one`
+- GDAL metadata tags embedded in each COG (visible in QGIS)
+- STAC item titles: `airp_id — roll_frame — date`
 
 ## Architecture
 
-Scaffolded from [fly](https://github.com/NewGraphEnvironment/fly) (v0.1.3).
+Built on [fly](https://github.com/NewGraphEnvironment/fly) (v0.3.0).
 
 ### fly package provides
 
-- `fly::fly_fetch()` — downloads thumbnails/flight logs from BC Data Catalogue URLs
-- `fly::fly_thumb_georef()` — warps thumbnails to estimated ground footprints as GeoTIFFs (BC Albers 3005)
+- `fly::fly_fetch()` — downloads thumbnails/flight logs (parallel via `workers` param)
+- `fly::fly_georef()` — warps images to estimated ground footprints as GeoTIFFs (BC Albers 3005), with `rotation` param for flight line bearing correction
 - `fly::fly_footprint()` — estimates ground coverage rectangles from centroids + scale
 - `fly::fly_select()` — greedy set-cover photo selection with `component_ensure` param
 - `fly::fly_filter()` — spatial filtering by footprint or centroid
-- Test data: 20 photos from Upper Bulkley River floodplain, 1968, dual scale (1:12000 + 1:31680)
+
+### Pipeline
+
+| Step | Script | What |
+|------|--------|------|
+| Fetch | `01_fetch.R` | Query BC Data Catalogue centroids, download thumbnails (6 parallel workers) |
+| Georef | `02_georef.R` | Warp thumbnails to ground footprints (BC Albers 3005) |
+| COG | `03_cog.R` + `03_cog_tag.py` | Convert to COGs (DEFLATE), embed GDAL metadata tags via rasterio |
+| S3 | `04_s3_upload.R` | `aws s3 sync` to `s3://stac-airphoto-bc` |
+| STAC | `05_stac_register.py` | Generate STAC items + collection with pystac, validate |
+
+Run end-to-end: `bash scripts/run_pipeline.sh`
+
+Registration on geopro (separate step):
+```bash
+ssh root@<GEOPRO_IP> "bash /tmp/stac_register-pypgstac.sh stac-airphoto-bc https://stac-airphoto-bc.s3.us-west-2.amazonaws.com"
+```
+
+### Embedded COG metadata
+
+Each COG carries GDAL tags (visible in QGIS Layer Properties → Information):
+`AIRP_ID`, `PHOTO_DATE`, `SCALE`, `FILM_ROLL`, `FRAME_NUMBER`, `FOCAL_LENGTH`, `FLYING_HEIGHT`, `FILENAME`
+
+Tags set via `03_cog_tag.py` (rasterio) because `terra::metags` can't persist custom tags.
 
 ### Source data
 
-- BC Data Catalogue centroid layer fields: `airp_id`, `photo_date`, `scale`, `focal_length`, `flying_height`, `ground_sample_distance`, `thumbnail_image_url`, `flight_log_url`, `camera_calibration_url`, `patb_georef_url`
-- ~97% of photos have thumbnail URLs (openmaps.gov.bc.ca/thumbs/ JPGs, ~1250x1250 grayscale)
-- Source centroids cached in `~/Projects/repo/diggs/data/l_photo_centroids.geojson` (9388 photos, Neexdzii Kwa area)
-
-### Pipeline (issues #1–#6)
-
-1. Fetch centroids + thumbnails per year
-2. Georef to footprints
-3. Convert to COGs
-4. Upload to S3
-5. Register STAC items on images.a11s.one
-6. Init CLAUDE.md
+- BC Data Catalogue centroid layer: `airp_id`, `photo_date`, `scale`, `focal_length`, `flying_height`, `thumbnail_image_url`, etc.
+- ~97% of photos have thumbnail URLs (openmaps.gov.bc.ca/thumbs/ JPGs, ~1250x1250)
+- Grayscale (1 band) pre-1986, RGB+alpha (4 band) post-1986
 
 ### Directory conventions
 
@@ -44,17 +68,14 @@ Asset type (`thumbs`, `scans`) carried through every stage:
 data/raw/thumbs/{year}/*.jpg              — downloaded thumbnails
 data/raw/georef/thumbs/{year}/*.tif       — georeferenced GeoTIFFs
 data/stac/thumbs/{year}/*.tif             — COGs (synced to s3://stac-airphoto-bc/)
-
-data/raw/scans/{year}/*.tif               — downloaded full-res scans (future)
-data/raw/georef/scans/{year}/*.tif        — georeferenced full-res (future)
-data/stac/scans/{year}/*.tif              — COGs (synced to S3, future)
 ```
 
-One STAC collection (`bc-airphoto`), one item per physical photo (`airp_id`), multiple assets:
+One STAC collection (`stac-airphoto-bc`), one item per physical photo (`airp_id`), multiple assets:
 
 ```json
 {
   "id": "695106",
+  "properties": { "title": "695106 — bc5281_084 — 1968-07-15" },
   "assets": {
     "thumbnail": { "href": ".../thumbs/1968/bc5281_084_thumb.tif" },
     "visual":    { "href": ".../scans/1968/bc5281_084.tif" }
@@ -67,6 +88,13 @@ One STAC collection (`bc-airphoto`), one item per physical photo (`airp_id`), mu
 - `data/centroids_raw.parquet` — cached BC Data Catalogue query (gitignored, re-query with `force_refresh = TRUE`)
 - `fly_filter()` re-runs fresh each time (footprint estimates may change)
 - `fly_fetch(overwrite = FALSE)` skips existing files on disk
+- `03_cog.R` skips existing COGs; `03_cog_tag.py` skips already-tagged COGs
+
+### Known issues
+
+- Diagonal flight lines (~230°, ~45° bearings) may still have rotation issues (fly#26). Workaround: set `rotation` column per roll.
+- Collection rebuild with `fly_georef(rotation = "auto")` pending (#13)
+- 249/9,990 photos missing thumbnail URLs in BC catalogue
 
 <\!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 
