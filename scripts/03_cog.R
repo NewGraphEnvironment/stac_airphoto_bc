@@ -5,7 +5,7 @@ library(terra)
 # --- Find georeferenced TIFFs -------------------------------------------
 
 georef_dir <- file.path("data", "raw", "georef", "thumbs")
-stac_dir <- file.path("data", "stac", "bc-airphoto", "thumbs")
+stac_dir <- file.path("data", "stac", "thumbs")
 
 georef_files <- list.files(georef_dir, pattern = "\\.tif$",
                            recursive = TRUE, full.names = TRUE)

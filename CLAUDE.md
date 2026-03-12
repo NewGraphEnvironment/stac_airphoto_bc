@@ -43,11 +43,11 @@ Asset type (`thumbs`, `scans`) carried through every stage:
 ```
 data/raw/thumbs/{year}/*.jpg              — downloaded thumbnails
 data/raw/georef/thumbs/{year}/*.tif       — georeferenced GeoTIFFs
-data/stac/bc-airphoto/thumbs/{year}/*.tif — COGs (synced to S3)
+data/stac/thumbs/{year}/*.tif             — COGs (synced to s3://stac-airphoto-bc/)
 
 data/raw/scans/{year}/*.tif               — downloaded full-res scans (future)
 data/raw/georef/scans/{year}/*.tif        — georeferenced full-res (future)
-data/stac/bc-airphoto/scans/{year}/*.tif  — COGs (synced to S3, future)
+data/stac/scans/{year}/*.tif              — COGs (synced to S3, future)
 ```
 
 One STAC collection (`bc-airphoto`), one item per physical photo (`airp_id`), multiple assets:
