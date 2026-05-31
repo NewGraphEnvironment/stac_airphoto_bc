@@ -3,8 +3,9 @@ stac_airphoto_bc
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-![status](https://img.shields.io/badge/status-groovy-green)
+![status](https://img.shields.io/badge/status-functional-green)
 ![photos](https://img.shields.io/badge/photos-9741-blue)
+![api](https://img.shields.io/badge/api-images.a11s.one-orange)
 
 The goal of
 [`stac_airphoto_bc`](https://github.com/NewGraphEnvironment/stac_airphoto_bc)
@@ -20,12 +21,15 @@ Currently covering the Neexdzii Kwa (Upper Bulkley River) watershed with
 This work is built on the
 [`fly`](https://github.com/NewGraphEnvironment/fly) R package which
 handles airphoto footprint estimation, spatial filtering, thumbnail
-downloading, and georeferencing. Sister repos serving other collections
-on the same endpoint include
-[`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc)
-(lidar DEMs) and
-[`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc) (UAV
-imagery).
+downloading, and georeferencing. Sister collections on the same
+endpoint:
+
+- [`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc) —
+  LidarBC digital elevation models (~58k GeoTIFFs)
+- [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc) —
+  UAV imagery organized by region / watershed-group / year
+- [`stac_orthophoto_bc`](https://github.com/NewGraphEnvironment/stac_orthophoto_bc) —
+  BC government orthophotos
 
 <br>
 
@@ -133,12 +137,34 @@ Browsing the airphoto collection in QGIS STAC Data Source Manager
 
 <br>
 
+## Roadmap
+
+- **Watershed expansion** — the current collection covers the Neexdzii
+  Kwa watershed (9,741 photos, 1963–2019). Extending to additional BC
+  watersheds is the natural next step; the pipeline is parameterized
+  by AOI so adding a watershed is mostly a fetch + georef + register
+  cycle.
+- **Rotation-corrected georeferencing** — landed in the most recent
+  rebuild via [`fly`](https://github.com/NewGraphEnvironment/fly)
+  v0.3.0; tracks the upstream `fly` roadmap for accuracy improvements
+  (footprint geometry from flight metadata: focal length, flying
+  height, tilt).
+- **Shared STAC-infrastructure direction** — improvements landing in
+  the sister `stac_*_bc` repos (true-footprint geometry, uv-based
+  Python dependency management, structured logging + benchmarking)
+  apply here too.
+
+Browse [open issues](https://github.com/NewGraphEnvironment/stac_airphoto_bc/issues)
+for the current backlog.
+
 ## Related
 
 - [`fly`](https://github.com/NewGraphEnvironment/fly) – R package for
   airphoto footprints, filtering, fetching, and georeferencing
 - [`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc) –
-  British Columbia lidar DEM collection
+  British Columbia LidarBC DEM collection
 - [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc) –
   UAV imagery collection
+- [`stac_orthophoto_bc`](https://github.com/NewGraphEnvironment/stac_orthophoto_bc) –
+  BC government orthophoto collection
 - [images.a11s.one](https://images.a11s.one) – STAC API endpoint
