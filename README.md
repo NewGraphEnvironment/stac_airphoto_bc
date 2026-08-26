@@ -28,8 +28,6 @@ endpoint:
   LidarBC digital elevation models (~58k GeoTIFFs)
 - [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc) —
   UAV imagery organized by region / watershed-group / year
-- [`stac_orthophoto_bc`](https://github.com/NewGraphEnvironment/stac_orthophoto_bc)
-  — BC government orthophotos
 
 <br>
 
@@ -165,6 +163,4 @@ for the current backlog.
   British Columbia LidarBC DEM collection
 - [`stac_uav_bc`](https://github.com/NewGraphEnvironment/stac_uav_bc) –
   UAV imagery collection
-- [`stac_orthophoto_bc`](https://github.com/NewGraphEnvironment/stac_orthophoto_bc)
-  – BC government orthophoto collection
 - [images.a11s.one](https://images.a11s.one) – STAC API endpoint
