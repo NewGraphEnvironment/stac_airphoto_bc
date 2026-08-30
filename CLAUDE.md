@@ -12,7 +12,8 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 
 ## Current State
 
-- 9,741 georeferenced thumbnail COGs covering Neexdzii Kwa watershed, 1963–2019
+- 9,976 georeferenced thumbnail COGs, 1967–2019
+- Two regions: Neexdzii Kwa watershed (9,741) and three small southeast BC AOIs (235)
 - 30.3 GiB on S3 (`s3://stac-airphoto-bc`)
 - Registered on pgstac via `images.a11s.one`
 - GDAL metadata tags embedded in each COG (visible in QGIS)
@@ -20,7 +21,7 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 
 ## Architecture
 
-Built on [fly](https://github.com/NewGraphEnvironment/fly) (v0.3.0).
+Built on [fly](https://github.com/NewGraphEnvironment/fly) (>= 0.5.0).
 
 ### fly package provides
 
@@ -34,13 +35,29 @@ Built on [fly](https://github.com/NewGraphEnvironment/fly) (v0.3.0).
 
 | Step | Script | What |
 |------|--------|------|
-| Fetch | `01_fetch.R` | Query BC Data Catalogue centroids, download thumbnails (6 parallel workers) |
+| Fetch | `01_fetch.R` | Query BC Data Catalogue centroids, select by footprint overlap, write the ledger, download thumbnails |
 | Georef | `02_georef.R` | Warp thumbnails to ground footprints (BC Albers 3005) |
 | COG | `03_cog.R` + `03_cog_tag.py` | Convert to COGs (DEFLATE), embed GDAL metadata tags via rasterio |
-| S3 | `04_s3_upload.R` | `aws s3 sync` to `s3://stac-airphoto-bc` |
-| STAC | `05_stac_register.py` | Generate STAC items + collection with pystac, validate |
+| STAC | `05_stac_register.py` | Generate items, **merge** into the published collection, validate |
+| S3 | `04_s3_upload.R` | Back up `collection.json`, then `aws s3 sync` (never `--delete`) |
 
-Run end-to-end: `bash scripts/run_pipeline.sh`
+Registration runs **before** the sync, so a run uploads its own STAC output.
+
+Run end-to-end: `bash scripts/run_pipeline.sh [aoi_id ...]`
+
+### The AOI is a parameter
+
+`scripts/aoi.R` is the registry — `neexdzii_kwa` (watershed), `se_a`, `se_b`,
+`se_c` (bboxes). Every stage takes ids on the command line and does all
+registered AOIs when given none; an unknown id aborts before any work.
+
+Per-AOI: centroid cache, AOI polygon, selected set, ledger, logs, report.
+Global and year-partitioned: `data/raw/`, `data/stac/`, and S3. Two overlapping
+AOIs therefore share a frame rather than publishing it twice.
+
+`data/select/<id>.csv` is a ledger with one row per candidate and exactly one
+outcome, reconciled against the centroid cache. `data/reports/<id>.md` renders
+from it.
 
 Registration on geopro (separate step):
 ```bash
@@ -95,6 +112,20 @@ One STAC collection (`stac-airphoto-bc`), one item per physical photo (`airp_id`
 - Diagonal flight lines (~230°, ~45° bearings) may still have rotation issues (fly#26). Workaround: set `rotation` column per roll.
 - Collection rebuild with `fly_georef(rotation = "auto")` pending (#13)
 - 249/9,990 photos missing thumbnail URLs in BC catalogue
+- **Digital frames are excluded.** `fly` (>= 0.4.0) will not size a footprint
+  without a sensor width (fly#32). The Neexdzii Kwa items predate that and were
+  sized as 9-inch negatives — `bcd12008` ships an 11,435 m footprint against
+  2,286–7,242 m for film. Those wrong items are still published; the southeast
+  AOIs simply stopped adding more.
+- **`fly_footprint()` drops `footprint_basis` on tibble input** (fly#35), which
+  is what `bcdata` returns. `aoi_centroids_as_sf()` coerces around it — remove
+  that once fly#35 lands.
+- No DEM-corrected footprints yet. fly 0.5.0's `dem` argument would grow
+  footprint area by a median 14%; applying it to one region only would leave the
+  collection half-corrected, so it waits for a rebuild of both.
+- `stac_register-pypgstac.sh` on geopro **deletes and reloads** from
+  `collection.json`, so that file is load-bearing. It also aborts after the
+  delete if any item fetch fails, which leaves the collection briefly empty.
 
 <!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 

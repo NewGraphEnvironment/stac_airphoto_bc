@@ -1,7 +1,10 @@
 name: stac-airphoto-bc
 channels:
+  # conda-forge only. The `defaults` channel points at repo.anaconda.com, whose
+  # Terms of Service must be accepted interactively before an env will build —
+  # `conda env create` fails with CondaToSNonInteractiveError otherwise. Nothing
+  # here needs it: python and pip come from conda-forge, everything else is pip.
   - conda-forge
-  - defaults
 dependencies:
   - python>=3.9
   - pip
