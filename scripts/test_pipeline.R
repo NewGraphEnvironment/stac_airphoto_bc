@@ -1,6 +1,10 @@
 # test_pipeline.R — end-to-end test of fetch → georef → COG → S3 → STAC
 #
-# Runs a sample of n photos through the full pipeline.
+# Usage:
+#   Rscript scripts/test_pipeline.R              # first registered AOI
+#   Rscript scripts/test_pipeline.R se_a         # a named AOI
+#
+# Runs a sample of n photos from one AOI through the full pipeline.
 # Use to validate after changes to fly, directory layout, or STAC schema.
 
 library(sf)
@@ -8,21 +12,22 @@ library(dplyr)
 library(arrow)
 library(fly)
 
+source("scripts/aoi.R")
+
 n_test <- 100
 seed <- 42
 
-# --- Load centroids from cache -------------------------------------------
+id <- aoi_ids()[1]
+message("Test AOI: ", id, " — ", aoi_label(id))
 
-centroids_raw <- arrow::read_parquet("data/centroids_raw.parquet") |>
-  sf::st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
-  sf::st_transform(3005)
+# --- Load the selected set 01_fetch.R wrote ------------------------------
 
-aoi <- fresh::frs_watershed_at_measure(
-  blue_line_key = 360873822,
-  downstream_route_measure = 166030.4
-) |> sf::st_transform(3005)
+sel_path <- aoi_path("selected", id)
+if (!file.exists(sel_path)) {
+  stop("No selected set for '", id, "' — run 01_fetch.R first.", call. = FALSE)
+}
 
-centroids <- fly::fly_filter(centroids_raw, aoi, method = "footprint") |>
+centroids <- aoi_centroids_as_sf(arrow::read_parquet(sel_path)) |>
   dplyr::mutate(year = as.integer(photo_year)) |>
   dplyr::filter(!is.na(thumbnail_image_url))
 
@@ -65,9 +70,10 @@ georef_results <- purrr::map_dfr(years, function(yr) {
   ph <- dplyr::filter(test_set, airp_id %in% fr$airp_id)
   if (nrow(fr) == 0) return(tibble::tibble())
   message("  ", yr, ": ", nrow(fr), " photos")
-  fly::fly_thumb_georef(
+  fly::fly_georef(
     fr, ph,
-    dest_dir = file.path("data", "raw", "georef", "thumbs", yr)
+    dest_dir = file.path("data", "raw", "georef", "thumbs", yr),
+    rotation = "auto"
   )
 })
 message("Georeffed: ", sum(georef_results$success), "/", nrow(georef_results))
@@ -77,16 +83,23 @@ message("Georeffed: ", sum(georef_results$success), "/", nrow(georef_results))
 message("\n=== COG ===")
 source("scripts/03_cog.R")
 
-# --- 04: S3 upload --------------------------------------------------------
+# --- 04: STAC register ----------------------------------------------------
+# Before the upload, not after — the sync must carry the item JSONs and
+# collection.json this run just wrote. stop() rather than warning(), so a failed
+# registration cannot fall through to publishing whatever is on disk.
+
+message("\n=== STAC REGISTER ===")
+exit_code <- system(
+  "conda run --no-capture-output -n stac-airphoto-bc python scripts/05_stac_register.py"
+)
+if (exit_code != 0) {
+  stop("STAC registration failed with exit code ", exit_code, call. = FALSE)
+}
+
+# --- 05: S3 upload --------------------------------------------------------
 
 message("\n=== S3 UPLOAD ===")
 source("scripts/04_s3_upload.R")
-
-# --- 05: STAC register ----------------------------------------------------
-
-message("\n=== STAC REGISTER ===")
-exit_code <- system("conda run -n stac-airphoto-bc python scripts/05_stac_register.py")
-if (exit_code != 0) warning("STAC registration failed")
 
 # --- Summary --------------------------------------------------------------
 

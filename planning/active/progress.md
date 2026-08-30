@@ -20,3 +20,29 @@
   selection decision to all footprint-overlapping frames, era for reporting
 - Filed fly#35 (footprint_basis dropped on tibble input)
 - Next: Phase 2 — parameterise every stage
+
+### Phases 2–4 implemented, Phase 5 run locally
+- `01_fetch.R`, `02_georef.R`, `00_review_samples.R`, `test_pipeline.R` parameterised
+  by AOI id; unknown id aborts before any work
+- `scripts/centroids.py` — shared loader so `03_cog_tag.py` and `05_stac_register.py`
+  read the union of per-AOI caches instead of one file
+- `05_stac_register.py` rewritten to MERGE with the published collection
+- `04_s3_upload.R` backs up collection.json, then syncs in two passes (no `--delete`)
+- `run_pipeline.sh`: `set -euo pipefail`, AOI args, register BEFORE sync, geopro IP from env
+- `README.Rmd` uses the registry rather than the fifth hardcoded AOI
+
+Measured:
+- se_a 818 window / 109 selected; se_b 840 / 108; se_c 1013 / 78
+- every ledger reconciles to its window
+- 295 selections but **235 unique frames** — 60 shared between A and B, fetched,
+  converted and published once, which is why the output trees are global
+- digital share varies far more than the issue assumed: 2.2% (A), 4% (B), **20% (C)**
+- merge dry-run: 9,741 published + 235 new = 9,976 links, 0 dropped, byte-identical
+  across two runs, extent grows to cover both regions
+
+Environment: the conda env did not exist on this machine and `conda env create`
+failed on an Anaconda ToS prompt for the `defaults` channel — while reporting exit 0
+through the task wrapper. Dropped `defaults` from environment.yml and built from
+conda-forge explicitly.
+
+- Next: code-check rounds, then S3 upload + registration

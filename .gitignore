@@ -1,13 +1,13 @@
-# Data
-data/*.gpkg
-data/*.geojson
-data/*.tif
-data/*.jpg
-data/*.csv
-data/*.rds
-data/*.parquet
-data/raw/
-data/stac/
+# Data — everything is regenerable from the pipeline, except the per-AOI
+# reports, which are a deliverable of issue #16 and are small markdown.
+#
+# The old patterns only matched direct children of data/, so once the AOI
+# became a parameter and artifacts moved into data/<kind>/<aoi_id>.<ext>,
+# every centroid cache, AOI polygon and log would have started being tracked.
+data/*
+!data/reports/
+data/reports/*
+!data/reports/*.md
 
 # R
 .Rhistory

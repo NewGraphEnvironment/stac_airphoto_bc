@@ -134,36 +134,36 @@ upstream as [fly#35](https://github.com/NewGraphEnvironment/fly/issues/35).
 
 ## Phase 2: Parameterise every stage
 
-- [ ] `01_fetch.R` — AOI ids from the command line (default all, **abort** on an
+- [x] `01_fetch.R` — AOI ids from the command line (default all, **abort** on an
       unknown id); per-AOI centroid cache and AOI gpkg; create `data/` and every
       subdirectory up front (B2); coerce the bcdata result to a plain
       `data.frame`-backed sf, which also settles the cache-hit/miss geometry
       asymmetry (G3, fly bug)
-- [ ] `02_georef.R` — read the per-AOI selected set rather than re-deriving the
+- [x] `02_georef.R` — read the per-AOI selected set rather than re-deriving the
       filter; join `bearing` computed on the **full candidate set** onto the
       frames being georeferenced (B3)
-- [ ] `00_review_samples.R` — parameterised, and its output moved out of the
+- [x] `00_review_samples.R` — parameterised, and its output moved out of the
       `02_georef.R` scan path (G2)
-- [ ] `test_pipeline.R` — parameterised; fix the removed `fly_thumb_georef()`
+- [x] `test_pipeline.R` — parameterised; fix the removed `fly_thumb_georef()`
       call (B5)
-- [ ] `03_cog.R` — per-AOI log path only; the disk scan stays global
-- [ ] `03_cog_tag.py` — read the **union** of `data/centroids/*.parquet` (B4)
-- [ ] `run_pipeline.sh` — `set -euo pipefail`, AOI ids passed through, geopro IP
+- [x] `03_cog.R` — per-AOI log path only; the disk scan stays global
+- [x] `03_cog_tag.py` — read the **union** of `data/centroids/*.parquet` (B4)
+- [x] `run_pipeline.sh` — `set -euo pipefail`, AOI ids passed through, geopro IP
       out of the source (S2), and **sync after registration** (B1)
-- [ ] `README.Rmd` — demonstrate the registry rather than the constant (S1);
+- [x] `README.Rmd` — demonstrate the registry rather than the constant (S1);
       rebuild `README.md` / `README.html` / `index.html`
 
 ## Phase 3: Candidate selection and the rejection ledger
 
-- [ ] Narrow the fetch window with `fly_filter(method = "footprint")`; keep every
+- [x] Narrow the fetch window with `fly_filter(method = "footprint")`; keep every
       frame that overlaps
-- [ ] One row per candidate in `data/select/<id>.csv` with a `rejected_reason`:
+- [x] One row per candidate in `data/select/<id>.csv` with a `rejected_reason`:
       `selected`, `digital_unknown_format`, `footprint_misses_aoi`,
       `no_thumbnail_url`, `fetch_failed`, `georef_failed`
-- [ ] Assert the ledger reconciles — rows equal candidates in the buffered window
-- [ ] Per-AOI markdown report: frames available and selected by era, year range,
+- [x] Assert the ledger reconciles — rows equal candidates in the buffered window
+- [x] Per-AOI markdown report: frames available and selected by era, year range,
       and every rejection with its reason and count
-- [ ] Abort loudly if an AOI selects zero frames
+- [x] Abort loudly if an AOI selects zero frames
 
 ## Phase 4: Additive registration
 
@@ -171,22 +171,22 @@ upstream as [fly#35](https://github.com/NewGraphEnvironment/fly/issues/35).
       write** — it is the one irreplaceable object in the bucket
 - [ ] Record the baseline: item-JSON count on S3 and `/search` count over the
       original watershed
-- [ ] `05_stac_register.py` — read the union of `data/centroids/*.parquet` (B4);
+- [x] `05_stac_register.py` — read the union of `data/centroids/*.parquet` (B4);
       merge new item links with the published ones (authenticated bucket listing
       as ground truth, `collection.json` as the credential-free fallback);
       recompute extent over the union
-- [ ] Stamp `airphoto:footprint_basis` on new items so a future DEM rebuild is a
+- [x] Stamp `airphoto:footprint_basis` on new items so a future DEM rebuild is a
       delta rather than archaeology
-- [ ] `--out <dir>` dry-run mode; assert as code that the old item hrefs are a
+- [x] `--out <dir>` dry-run mode; assert as code that the old item hrefs are a
       subset of the new, the new bbox contains the published bbox, and running
       twice is idempotent
-- [ ] Sync JSONs in a pass without `--size-only` (G1); never `--delete`
+- [x] Sync JSONs in a pass without `--size-only` (G1); never `--delete`
 
 ## Phase 5: Run the three AOIs end to end
 
-- [ ] Run `se_a` through fetch → georef → COG → tag as a single-AOI smoke test
-- [ ] Dry-run the collection merge and check the assertions before the first sync
-- [ ] Run `se_b` and `se_c`; confirm frames shared between A and B were fetched
+- [x] Run `se_a` through fetch → georef → COG → tag as a single-AOI smoke test
+- [x] Dry-run the collection merge and check the assertions before the first sync
+- [x] Run `se_b` and `se_c`; confirm frames shared between A and B were fetched
       once, not twice
 - [ ] Upload, register, then sync again (B1)
 - [ ] Register on geopro; confirm `/search` returns over each new AOI **and**

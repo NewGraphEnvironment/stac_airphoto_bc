@@ -118,17 +118,191 @@ aoi_ids <- function(args = commandArgs(trailingOnly = TRUE)) {
 
 #' Path to a per-AOI artifact, creating its directory
 #'
-#' `what` is one of "centroids", "selected", "aoi", "report", or a log name
+#' `what` is one of "centroids", "selected", "ledger", "aoi", "report", or a
+#' log name
 #' ("fetch_log", "georef_log", "cog_log").
+aoi_logs <- function() c("fetch_log", "georef_log", "cog_log")
+
 aoi_path <- function(what, id) {
   spec <- switch(
     what,
     centroids = list(dir = "data/centroids", ext = ".parquet"),
     selected  = list(dir = "data/selected",  ext = ".parquet"),
+    ledger    = list(dir = "data/select",    ext = ".csv"),
     aoi       = list(dir = "data/aoi",       ext = ".gpkg"),
     report    = list(dir = "data/reports",   ext = ".md"),
-    list(dir = file.path("data", "logs", what), ext = ".csv")
+    # Named logs only. Without this, a typo — aoi_path("centroid", id) — fell
+    # through to a plausible-looking data/logs/centroid/<id>.csv and created the
+    # directory, so the artifact went somewhere nothing reads and every later
+    # file.exists() guard reported "run 01_fetch.R first".
+    if (what %in% aoi_logs()) {
+      list(dir = file.path("data", "logs", what), ext = ".csv")
+    } else {
+      stop("Unknown artifact kind '", what, "'. Known: ",
+           paste(c("centroids", "selected", "ledger", "aoi", "report",
+                   aoi_logs()), collapse = ", "),
+           call. = FALSE)
+    }
   )
   dir.create(spec$dir, recursive = TRUE, showWarnings = FALSE)
   file.path(spec$dir, paste0(id, spec$ext))
+}
+
+# --- Era bins -------------------------------------------------------------
+# Reporting dimension only. Selection keeps every frame whose footprint
+# overlaps the AOI (issue #16) — era is how the report is grouped, not a filter.
+# The breaks are the ones the issue measured: pre-1980, 1980–1999, 2000+.
+
+aoi_era <- function(year) {
+  cut(
+    as.integer(year),
+    breaks = c(-Inf, 1979, 1999, Inf),
+    labels = c("pre1980", "1980_1999", "2000plus")
+  )
+}
+
+# --- Rotation -------------------------------------------------------------
+
+#' Derive per-photo rotation from flight-line bearing
+#'
+#' Mirrors fly's internal `bearing_to_rotation()` (fly/R/fly_georef.R:300),
+#' which is not exported. Kept here because we must compute rotation ourselves:
+#' `fly_georef(rotation = "auto")` calls `fly_bearing()` on whatever set it is
+#' handed, and `fly_bearing()` derives each frame's bearing from the *next frame
+#' on the same roll in that set*. Filtering to one AOI thins the rolls, so a
+#' frame whose successor was filtered out gets `NA` and silently falls back to
+#' the fixed 180 degrees that fly#25/#26 exist to correct.
+#'
+#' So bearing is computed once over the whole fetch window, where the rolls are
+#' intact, and carried forward as a `rotation` column — which `fly_georef()`
+#' honours in preference to recomputing (fly/R/fly_georef.R:127).
+aoi_rotation <- function(bearing) {
+  rot <- (floor((bearing + 91) / 90) * 90L) %% 360L
+  rot[is.na(rot)] <- 180L
+  as.integer(rot)
+}
+
+# --- Provenance -----------------------------------------------------------
+
+#' Coerce centroids to a plain data.frame-backed sf in EPSG:3005
+#'
+#' Two reasons, both load-bearing:
+#'
+#' 1. `fly_footprint()` silently drops `footprint_basis`, `footprint_terrain`,
+#'    `height_agl` and `dem_coverage` when its input carries the `tbl_df` class,
+#'    which is exactly what `bcdata::collect()` returns (fly#35). Those columns
+#'    are the whole rejection ledger, and nothing errors when they go missing.
+#' 2. Points are always rebuilt from `longitude`/`latitude`, so a cache hit and
+#'    a cache miss produce identical geometry rather than the WFS `SHAPE` in one
+#'    case and rebuilt points in the other.
+aoi_centroids_as_sf <- function(x) {
+  df <- as.data.frame(sf::st_drop_geometry(x))
+  sf::st_transform(
+    # remove = FALSE keeps longitude/latitude as columns, so the frame survives
+    # a parquet round-trip and every stage rebuilds the same geometry from them.
+    sf::st_as_sf(df, coords = c("longitude", "latitude"), crs = 4326,
+                 remove = FALSE),
+    3005
+  )
+}
+
+# --- Rejection ledger and report ------------------------------------------
+
+# One row per frame in the buffered fetch window, each with exactly one
+# outcome. The counts must reconcile to the window, which is what makes
+# "what selection rejected and why" answerable rather than asserted.
+aoi_reasons <- function() {
+  c("selected", "digital_unknown_format", "footprint_misses_aoi",
+    "no_thumbnail_url", "fetch_failed", "georef_failed")
+}
+
+#' Write the ledger, asserting it accounts for every candidate
+#'
+#' The count is read back from the centroid cache on disk rather than passed in.
+#' A caller-supplied total is whatever the caller already computed from the
+#' ledger itself — `nrow(ledger)` compared against `nrow(ledger)` — so the guard
+#' held for any input and could not go red. The cache is an independent record
+#' of how many frames the query returned.
+aoi_ledger_write <- function(ledger, id) {
+  cache <- aoi_path("centroids", id)
+  if (!file.exists(cache)) {
+    stop("No centroid cache for '", id, "' — cannot reconcile the ledger.",
+         call. = FALSE)
+  }
+  window_n <- nrow(arrow::read_parquet(cache))
+
+  if (nrow(ledger) != window_n) {
+    stop(
+      "Ledger does not reconcile for '", id, "': ", nrow(ledger),
+      " rows against ", window_n, " frames in the cached fetch window.",
+      call. = FALSE
+    )
+  }
+  unknown <- setdiff(unique(ledger$rejected_reason), aoi_reasons())
+  if (length(unknown)) {
+    stop("Unregistered rejection reason(s): ",
+         paste(unknown, collapse = ", "), call. = FALSE)
+  }
+  readr::write_csv(ledger, aoi_path("ledger", id))
+  invisible(ledger)
+}
+
+#' Render the per-AOI markdown report from the ledger
+aoi_report_write <- function(ledger, id) {
+  sel <- ledger[ledger$rejected_reason == "selected", ]
+
+  by_era <- ledger |>
+    dplyr::count(era, rejected_reason) |>
+    tidyr::pivot_wider(names_from = rejected_reason, values_from = n,
+                       values_fill = 0)
+
+  yr <- if (nrow(sel)) range(sel$photo_year, na.rm = TRUE) else c(NA, NA)
+
+  lines <- c(
+    paste0("# ", id, " — ", aoi_label(id)),
+    "",
+    paste0("Generated ", format(Sys.Date())),
+    "",
+    "## Summary",
+    "",
+    paste0("- Frames in the 8 km fetch window: **", nrow(ledger), "**"),
+    paste0("- Frames selected: **", nrow(sel), "**"),
+    paste0("- Year range obtained: **",
+           if (is.na(yr[1])) "none" else paste(yr, collapse ="–"), "**"),
+    "",
+    "## Selected by era",
+    "",
+    knitr::kable(
+      dplyr::count(sel, era, name = "selected"),
+      format = "markdown"
+    ),
+    "",
+    "## Every frame accounted for, by era",
+    "",
+    knitr::kable(by_era, format = "markdown"),
+    "",
+    "## Why frames were rejected",
+    "",
+    knitr::kable(
+      dplyr::count(ledger, rejected_reason, name = "frames"),
+      format = "markdown"
+    ),
+    "",
+    "Rejection reasons:",
+    "",
+    "- `digital_unknown_format` — a digital frame. `fly` (>= 0.4.0) will not",
+    "  size a footprint it cannot derive, because a sensor's width is not in",
+    "  the centroid metadata (fly#32). These are the frames the published",
+    "  Neexdzii Kwa collection sized as 9-inch negatives, which is why one of",
+    "  them ships an 11,435 m footprint. Excluding them stops shipping that.",
+    "- `footprint_misses_aoi` — sized, but the ground footprint does not reach",
+    "  the AOI. Expected: the window is buffered by 8 km precisely so no",
+    "  overlapping frame is missed, and most of that buffer does not overlap.",
+    "- `no_thumbnail_url` — the catalogue has no thumbnail for this frame.",
+    "- `fetch_failed` / `georef_failed` — the frame was selected and the",
+    "  pipeline could not produce an asset for it."
+  )
+
+  writeLines(lines, aoi_path("report", id))
+  invisible(lines)
 }
