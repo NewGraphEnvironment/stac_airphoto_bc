@@ -238,6 +238,18 @@ aoi_ledger_write <- function(ledger, id) {
       call. = FALSE
     )
   }
+  # Row count alone is weak in 01_fetch.R, where the ledger is a transmute() of
+  # the frame read from this same cache and the counts agree by construction.
+  # Unique ids is the part that can actually differ.
+  if (dplyr::n_distinct(ledger$airp_id) != nrow(ledger)) {
+    stop(
+      "Ledger for '", id, "' has ", nrow(ledger), " rows but only ",
+      dplyr::n_distinct(ledger$airp_id), " distinct airp_id — a frame is ",
+      "counted more than once, so the rejection totals do not partition.",
+      call. = FALSE
+    )
+  }
+
   unknown <- setdiff(unique(ledger$rejected_reason), aoi_reasons())
   if (length(unknown)) {
     stop("Unregistered rejection reason(s): ",

@@ -222,15 +222,6 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
     return items
 
 
-def _dedupe(seq):
-    """Order-preserving dedupe for extent lists (which are unhashable)."""
-    out = []
-    for x in seq:
-        if x not in out:
-            out.append(x)
-    return out
-
-
 def bbox_union(a, b):
     return [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
 
@@ -260,10 +251,6 @@ def main() -> int:
         print("No items built — nothing to write")
         return 1
 
-    for item in items:
-        (out_dir / f"{item.id}.json").write_text(
-            json.dumps(item.to_dict(), indent=2))
-
     new_bbox = [
         min(i.bbox[0] for i in items), min(i.bbox[1] for i in items),
         max(i.bbox[2] for i in items), max(i.bbox[3] for i in items),
@@ -288,23 +275,12 @@ def main() -> int:
     new_links = {s3_href(f"{i.id}.json") for i in items}
     old_links, old_bbox, old_interval = set(), None, None
 
-    old_sub_bboxes, old_sub_intervals = [], []
     if published:
         old_links = {l["href"] for l in published.get("links", [])
                      if l.get("rel") == "item"}
-        sp = published["extent"]["spatial"]["bbox"]
-        tp = published["extent"]["temporal"]["interval"]
-        old_bbox, old_interval = sp[0], tp[0]
-        # bbox[0] is the OVERALL extent; bbox[1:] are the per-region sub-extents
-        # a previous run wrote. Reading only bbox[0] and re-listing it as a
-        # region would make run 2 duplicate the overall box and drop every
-        # region but the newest — the extent would stop being idempotent and
-        # the sub-extents would decay to exactly the empty-through-the-middle
-        # box they exist to prevent.
-        old_sub_bboxes = [b for b in sp[1:]]
-        old_sub_intervals = [t for t in tp[1:]]
-        print(f"Published collection carries {len(old_links)} item links "
-              f"and {len(old_sub_bboxes)} sub-extent(s)")
+        old_bbox = published["extent"]["spatial"]["bbox"][0]
+        old_interval = published["extent"]["temporal"]["interval"][0]
+        print(f"Published collection carries {len(old_links)} item links")
 
     # New items win where an id appears in both, so a regenerated item replaces
     # its published link rather than sitting beside it.
@@ -312,34 +288,50 @@ def main() -> int:
     by_id.update({link_id(h): h for h in sorted(new_links)})
     all_links = sorted(by_id.values())
 
-    if old_bbox:
-        overall_bbox = bbox_union(old_bbox, new_bbox)
-        # STAC 1.1: bbox[0] is the overall extent, the rest are sub-extents.
-        # Listing the regions separately stops the collection claiming a
-        # 600 km-wide box that is empty through the middle.
-        regions = old_sub_bboxes or [old_bbox]
-        bboxes = [overall_bbox] + _dedupe(regions + [new_bbox])
-    else:
-        overall_bbox, bboxes = new_bbox, [new_bbox]
+    # Overall extent only — no per-region sub-extents.
+    #
+    # STAC 1.1 allows bbox[1:] as sub-extents, and listing the two regions
+    # separately reads better than one 600 km box that is empty through the
+    # middle. It was tried and removed, because this script cannot produce
+    # honest ones: `new_bbox` is the union over the WHOLE global data/stac tree,
+    # not the AOI just processed, so after three AOIs the appended "region" was
+    # itself a box spanning se_c to se_b with nothing in between — the very
+    # thing it was meant to avoid — and the list grew by one entry per run.
+    # Doing it properly means grouping items by AOI through the ledgers and
+    # keying sub-extents so a re-run replaces rather than appends. Worth doing;
+    # not worth guessing at. A correct overall extent beats a decorative list.
+    overall_bbox = bbox_union(old_bbox, new_bbox) if old_bbox else new_bbox
+    bboxes = [overall_bbox]
 
     def parse_dt(s):
-        return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
+        """Parse a STAC timestamp as timezone-aware.
 
-    # A published temporal extent may legitimately be open-ended ([null, null]
-    # is valid STAC). `[None, None]` is a truthy list, so testing the list
-    # rather than its contents would reach min(None, datetime) and raise.
-    old_dts = None
-    if old_interval and all(old_interval):
-        old_dts = [parse_dt(old_interval[0]), parse_dt(old_interval[1])]
-        overall_interval = [min(old_dts[0], new_interval[0]),
-                            max(old_dts[1], new_interval[1])]
-        sub = old_sub_intervals or [old_interval]
-        parsed_subs = [[parse_dt(a), parse_dt(b)] for a, b in sub
-                       if a and b]
-        intervals = [overall_interval] + _dedupe(
-            parsed_subs + [new_interval])
-    else:
-        overall_interval, intervals = new_interval, [new_interval]
+        A naive published timestamp compared against the tz-aware datetimes
+        pystac produces raises "can't compare offset-naive and offset-aware".
+        """
+        if not s:
+            return None
+        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    # A published temporal extent may legitimately be open-ended: [start, null]
+    # and [null, end] are both valid STAC. An earlier version required BOTH ends
+    # to be present and fell through to "use the new items' range" otherwise —
+    # which silently replaced a 1968-2019 published extent with a single AOI's
+    # few years. Each end is merged independently, and an open end stays open,
+    # because null means unbounded and unbounded already contains everything.
+    old_start = parse_dt(old_interval[0]) if old_interval else None
+    old_end = parse_dt(old_interval[1]) if old_interval else None
+    open_start = bool(old_interval) and old_interval[0] is None
+    open_end = bool(old_interval) and old_interval[1] is None
+
+    merged_start = None if open_start else (
+        min(old_start, new_interval[0]) if old_start else new_interval[0])
+    merged_end = None if open_end else (
+        max(old_end, new_interval[1]) if old_end else new_interval[1])
+
+    overall_interval = [merged_start, merged_end]
+    intervals = [overall_interval]
 
     collection = pystac.Collection(
         id=COLLECTION_ID,
@@ -380,22 +372,36 @@ def main() -> int:
 
     failures = []
     if published:
-        missing = old_links - set(written_item_links)
+        # Compare by ITEM ID, matching how the merge dedupes. Comparing raw
+        # href strings here while the merge keys by id makes the two disagree:
+        # a published href in an equivalent-but-different form is correctly
+        # replaced by the merge and then reported missing by the assertion,
+        # hard-failing every run — the one case link_id() exists for.
+        written_ids = {link_id(h) for h in written_item_links}
+        missing = {link_id(h) for h in old_links} - written_ids
         if missing:
             failures.append(
-                f"{len(missing)} published item links absent from the written "
+                f"{len(missing)} published items absent from the written "
                 f"collection")
         if not bbox_contains(written_bbox, old_bbox):
             failures.append(
                 f"written bbox {written_bbox} does not contain published "
                 f"{old_bbox}")
-        if old_dts:
-            w0, w1 = parse_dt(written_interval[0]), parse_dt(written_interval[1])
-            if w0 is None or w1 is None or w0 > old_dts[0] or w1 < old_dts[1]:
-                failures.append(
-                    "written temporal interval does not contain the published one")
-    if len(written_item_links) != len(set(written_item_links)):
-        failures.append("duplicate item links in the written collection")
+        # Each end independently: an open published end must stay open, and a
+        # closed one must not be narrowed. Not gated on both ends existing —
+        # that gate is what let an open interval through unchecked.
+        w0, w1 = parse_dt(written_interval[0]), parse_dt(written_interval[1])
+        if open_start and w0 is not None:
+            failures.append("written interval closed a published open start")
+        if old_start and (w0 is None or w0 > old_start):
+            failures.append("written interval starts after the published one")
+        if open_end and w1 is not None:
+            failures.append("written interval closed a published open end")
+        if old_end and (w1 is None or w1 < old_end):
+            failures.append("written interval ends before the published one")
+    # No duplicate-link check: the merge builds links from a dict keyed by
+    # link_id(), so values are unique by construction and reading the file back
+    # cannot change that. An assertion that no input can fail is decoration.
     if len(written_item_links) < len(old_links):
         failures.append(
             f"written collection has {len(written_item_links)} item links, "
@@ -421,6 +427,13 @@ def main() -> int:
         collection_tmp.unlink(missing_ok=True)
         return 1
 
+    # Only now write anything durable. Item JSONs used to be written before the
+    # checks, so a failed run left a directory the next bare `04_s3_upload.R`
+    # would sync — collection.json was moved behind a temp file for exactly that
+    # reason and the items were left in front of it.
+    for item in items:
+        (out_dir / f"{item.id}.json").write_text(
+            json.dumps(item.to_dict(), indent=2))
     collection_tmp.replace(collection_path)
     print(f"{len(items)} items + collection valid; merge assertions passed")
     print(f"Collection written to {collection_path}")

@@ -46,3 +46,20 @@ through the task wrapper. Dropped `defaults` from environment.yml and built from
 conda-forge explicitly.
 
 - Next: code-check rounds, then S3 upload + registration
+
+### Phase 5 complete — published and registered
+- Baseline recorded before any write: 9,741 over the watershed, 0 over each new AOI
+- Registered and synced: S3 9,742 -> 9,977 objects (+235 exactly), collection backed up
+- pypgstac reload: 9,976 items
+- Verified live: watershed **9,741** (unchanged), AOI A **116**, B **121**, C **78**,
+  extent covers both regions, temporal 1967-07-11..2019-09-18
+
+Note on the pypgstac script: it DELETEs the collection and reloads from
+collection.json's item links, so the merge is load-bearing — an unmerged
+collection would have deleted 9,741 items from the catalog. It also leaves the
+collection empty between the delete and the load (~10 min).
+
+### Review rounds
+- Round 1: 12 findings, all fixed
+- Round 2 (reviewing the fixes): 3 real bugs **inside** the round 1 fixes, plus one
+  still-tautological assertion and two partial fixes — all fixed
