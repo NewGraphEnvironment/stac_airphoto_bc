@@ -167,9 +167,9 @@ upstream as [fly#35](https://github.com/NewGraphEnvironment/fly/issues/35).
 
 ## Phase 4: Additive registration
 
-- [ ] Back up the published `collection.json` to S3 and locally **before any
+- [x] Back up the published `collection.json` to S3 and locally **before any
       write** — it is the one irreplaceable object in the bucket
-- [ ] Record the baseline: item-JSON count on S3 and `/search` count over the
+- [x] Record the baseline: item-JSON count on S3 and `/search` count over the
       original watershed
 - [x] `05_stac_register.py` — read the union of `data/centroids/*.parquet` (B4);
       merge new item links with the published ones (authenticated bucket listing
@@ -188,20 +188,20 @@ upstream as [fly#35](https://github.com/NewGraphEnvironment/fly/issues/35).
 - [x] Dry-run the collection merge and check the assertions before the first sync
 - [x] Run `se_b` and `se_c`; confirm frames shared between A and B were fetched
       once, not twice
-- [ ] Upload, register, then sync again (B1)
-- [ ] Register on geopro; confirm `/search` returns over each new AOI **and**
+- [x] Upload, register, then sync again (B1)
+- [x] Register on geopro; confirm `/search` returns over each new AOI **and**
       still returns the baseline count over the original watershed
-- [ ] Confirm the live collection extent covers both regions
-- [ ] Update `scripts/README.md` and CLAUDE.md
+- [x] Confirm the live collection extent covers both regions
+- [x] Update `scripts/README.md` and CLAUDE.md
 
 ## Validation
 
-- [ ] Existing AOI resolves to the same polygon as the published collection implies
-- [ ] `/search` returns items over all three new AOIs
-- [ ] Live collection extent covers both regions; existing 9,741 items intact
-- [ ] Per-AOI report produced for each of A, B, C, with a reconciling ledger
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work; `/planning-archive` on completion
+- [x] Existing AOI resolves to the same polygon as the published collection implies
+- [x] `/search` returns items over all three new AOIs
+- [x] Live collection extent covers both regions; existing 9,741 items intact
+- [x] Per-AOI report produced for each of A, B, C, with a reconciling ledger
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work; `/planning-archive` on completion
 
 ## Verification commands
 
