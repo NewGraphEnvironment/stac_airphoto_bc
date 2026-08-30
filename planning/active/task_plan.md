@@ -66,90 +66,140 @@ and nothing else.
 
 | Decision | Choice |
 |---|---|
-| Digital frames (~20%, `unknown_format` under fly ≥ 0.4.0) | **Exclude, report the count per AOI.** fly#32 is the follow-up. |
-| DEM-corrected footprints (fly 0.5.0 `dem` arg) | **Not this run.** Keeps new AOIs derived like the published 9,741; follow-up rebuilds both regions together. |
-| Selection | **`fly_select(mode = "minimal", target_coverage = 0.95)` within three eras** — pre-1980, 1980–1999, 2000+, the breaks the issue itself measured. |
+| Digital frames (`unknown_format` under fly ≥ 0.4.0) | **Exclude, report the count per AOI.** fly#32 is the follow-up. |
+| DEM-corrected footprints (fly 0.5.0 `dem` arg) | **Not this run.** One variable at a time; follow-up rebuilds both regions together. |
+| Selection | **All frames whose footprint overlaps the AOI**, reported by era (pre-1980, 1980–1999, 2000+). Minimal set-cover was measured and rejected — see below. |
+
+### Why minimal set-cover was dropped
+
+Measured on AOI A: 818 centroids in the 8 km fetch window → 116 frames whose
+footprint overlaps the AOI → `fly_select(mode = "minimal", target_coverage = 0.95)`
+selects **exactly 1 frame per era**, because film footprints here are 2.3–7.2 km
+wide and the AOI is ~1 km². That is 3 photos for AOI A and ~9 across all three.
+The user chose to keep every footprint-overlapping frame instead (~350 total).
+Era is now a **reporting** dimension, not a pruning one. `fly_select` is not
+used; `fly_coverage` and `fly_overlap` are used for the report.
+
+## Verified findings from the concurrent Plan-agent review
+
+Each was reproduced before being accepted. Findings not listed here were either
+already covered by the plan or not reproduced.
+
+| # | Finding | Verified how |
+|---|---|---|
+| B1 | `run_pipeline.sh` syncs to S3 (line 23) **before** registration writes the item JSONs (line 27) — so the JSONs a run produces never reach S3 | read the script; ordering is unambiguous |
+| B2 | A fresh run dies at `01_fetch.R:21` — `data/` is gitignored and absent, and nothing creates it | `[ -d data ]` is false on this machine |
+| B3 | Selection strands `fly_georef(rotation = "auto")`: a thinned roll gives `fly_bearing()` no successor, so every frame silently falls back to the fixed 180° | measured — bearing NA **3/3** on a selected set, **0/3** when joined from the full candidate set (172.7°, 84.8°, 262.3°) |
+| B4 | `05_stac_register.py` and `03_cog_tag.py` each read a single `CACHE_PATH`, so with per-AOI parquets they would drop every other AOI's COGs | read both; `03_cog_tag.py:15` confirmed |
+| G1 | `04_s3_upload.R` uses `--size-only`, so a regenerated JSON of identical byte count never uploads | read the script |
+| G2 | `00_review_samples.R` writes into `data/raw/thumbs/samples/`, which `02_georef.R` then picks up in its recursive scan — the same photo twice | read both paths |
+| G3 | Cache-miss keeps the WFS geometry; cache-hit rebuilds points from lon/lat — same photo, two provenances | read `01_fetch.R:48-50` |
+| S1 | A **fifth** hardcoded AOI, in the published `README.Rmd:84-85` | grep |
+| S2 | `run_pipeline.sh:32` hardcodes the geopro IP in a public repo | grep |
+| Q4 | The published collection already contains digital frames sized as 9-inch negatives | sampled live items: `bcd12008` (100 mm, 1:50000) ships an **11,435 m**-wide footprint against 2,286–7,242 m for every film frame |
+
+### Found while verifying: an upstream fly bug
+
+`fly_footprint()` **silently drops `footprint_basis`, `footprint_terrain`,
+`height_agl` and `dem_coverage` when its input carries the `tbl_df` class** —
+which is exactly what `bcdata::collect()` returns. Measured:
+
+```
+bcdc_sf,sf,tbl_df,tbl,data.frame  -> footprint_basis absent
+sf,tbl_df,tbl,data.frame          -> footprint_basis absent
+sf,data.frame                     -> footprint_basis present
+```
+
+So the entire reporting surface fly 0.4.0/0.5.0 added is invisible to any
+caller feeding it bcdata output, and the digital exclusion stays silent. The
+pipeline coerces to a plain `data.frame`-backed sf after the query; filed
+upstream as [fly#35](https://github.com/NewGraphEnvironment/fly/issues/35).
 
 ## Phase 1: Prerequisites and the AOI registry
 
-- [ ] Upgrade installed `fly` 0.3.0 → 0.5.0 (local source tree is already at
-      0.5.0); record the version in `scripts/README.md` prerequisites
-- [ ] Confirm `fly_footprint()` on a sample of southern centroids returns
-      `footprint_basis` values as expected, and count how many are
-      `unknown_format` — this is the number the per-AOI report will carry
-- [ ] Add `scripts/aoi.R`: a declarative registry, one entry per AOI, carrying
-      an `id` and either a watershed spec (`blue_line_key` +
-      `downstream_route_measure`) or a `bbox`; plus a resolver returning an
-      `sf` polygon in EPSG:3005 for either shape
-- [ ] Register four AOIs: `neexdzii_kwa` (the existing watershed, unchanged),
-      `se_a`, `se_b`, `se_c` (the three bboxes from the issue)
-- [ ] Add a single helper for per-AOI output paths so no two AOIs share a cache,
-      gpkg or log file
+- [x] Upgrade installed `fly` 0.3.0 → 0.5.0
+- [x] Add `scripts/aoi.R`: registry, resolver (watershed **and** bbox), per-AOI
+      path helper
+- [x] Register four AOIs: `neexdzii_kwa` (existing constants, unchanged), `se_a`,
+      `se_b`, `se_c`
+- [x] Verify the registry reproduces the original watershed — resolves to
+      `-126.7470, 54.1018, -125.9112, 54.6744`, 2,319 km², a subset of the
+      published item extent as it should be (items are footprints, which
+      overhang the AOI)
+- [x] Measure `media` / footprint basis on real southern centroids — 818 in the
+      AOI A window, 18 `Digital - Colour` (2.2%, not the 20% the issue assumed),
+      800 film
+- [x] Pin `fly (>= 0.5.0)` in `scripts/README.md` and CLAUDE.md
+- [x] File the `tbl_df` column-drop bug upstream on fly — [fly#35](https://github.com/NewGraphEnvironment/fly/issues/35)
 
-## Phase 2: Parameterise the AOI-hardcoding scripts
+## Phase 2: Parameterise every stage
 
-- [ ] `01_fetch.R` — take AOI ids from a command-line arg (default: all);
-      resolve via the registry; move the centroid cache to
-      `data/centroids/<aoi_id>.parquet` and the AOI to
-      `data/aoi/<aoi_id>.gpkg`; per-AOI `fetch_log`
-- [ ] `02_georef.R` — same parameterisation; read the per-AOI cache; per-AOI
-      `georef_log`
-- [ ] `00_review_samples.R` — same parameterisation
-- [ ] `test_pipeline.R` — same parameterisation, **and** fix the removed
-      `fly_thumb_georef()` call to `fly_georef()` so the harness runs again
-- [ ] `03_cog.R` — per-AOI `cog_log` path only; the disk scan stays as-is
-- [ ] `run_pipeline.sh` — accept and pass through AOI ids; keep the no-arg
-      default working
-- [ ] Verify the existing AOI still resolves to the same polygon it did before
-      (compare against the published collection's bbox), so parameterisation is
-      provably behaviour-preserving for the area already published
+- [ ] `01_fetch.R` — AOI ids from the command line (default all, **abort** on an
+      unknown id); per-AOI centroid cache and AOI gpkg; create `data/` and every
+      subdirectory up front (B2); coerce the bcdata result to a plain
+      `data.frame`-backed sf, which also settles the cache-hit/miss geometry
+      asymmetry (G3, fly bug)
+- [ ] `02_georef.R` — read the per-AOI selected set rather than re-deriving the
+      filter; join `bearing` computed on the **full candidate set** onto the
+      frames being georeferenced (B3)
+- [ ] `00_review_samples.R` — parameterised, and its output moved out of the
+      `02_georef.R` scan path (G2)
+- [ ] `test_pipeline.R` — parameterised; fix the removed `fly_thumb_georef()`
+      call (B5)
+- [ ] `03_cog.R` — per-AOI log path only; the disk scan stays global
+- [ ] `03_cog_tag.py` — read the **union** of `data/centroids/*.parquet` (B4)
+- [ ] `run_pipeline.sh` — `set -euo pipefail`, AOI ids passed through, geopro IP
+      out of the source (S2), and **sync after registration** (B1)
+- [ ] `README.Rmd` — demonstrate the registry rather than the constant (S1);
+      rebuild `README.md` / `README.html` / `index.html`
 
-## Phase 3: Selection by overlap and era
+## Phase 3: Candidate selection and the rejection ledger
 
-- [ ] Add a selection step between filter and fetch: `fly_footprint()` →
-      `fly_overlap()` → `fly_select(mode = "minimal", target_coverage = 0.95)`,
-      run within each of the three eras
-- [ ] Frames with no footprint (`unknown_format`) are counted and named as
-      rejected, not silently dropped — fly warns, and the report must carry it
-- [ ] Emit a per-AOI report: frames available, frames selected per era, year
-      range obtained, and every rejection with its reason
-- [ ] Confirm the existing AOI's behaviour is opt-in — selection must not
-      silently change what would be fetched for `neexdzii_kwa`
+- [ ] Narrow the fetch window with `fly_filter(method = "footprint")`; keep every
+      frame that overlaps
+- [ ] One row per candidate in `data/select/<id>.csv` with a `rejected_reason`:
+      `selected`, `digital_unknown_format`, `footprint_misses_aoi`,
+      `no_thumbnail_url`, `fetch_failed`, `georef_failed`
+- [ ] Assert the ledger reconciles — rows equal candidates in the buffered window
+- [ ] Per-AOI markdown report: frames available and selected by era, year range,
+      and every rejection with its reason and count
+- [ ] Abort loudly if an AOI selects zero frames
 
-## Phase 4: Make registration additive (the risky one)
+## Phase 4: Additive registration
 
-- [ ] `05_stac_register.py` — read metadata from **every** per-AOI parquet under
-      `data/centroids/`, not one fixed file
-- [ ] Merge newly generated items with the existing published items rather than
-      replacing them: enumerate the existing item set, and recompute the
-      collection's spatial and temporal extent over the **union**
-- [ ] Enumerate via the authenticated bucket listing (verified working: 9,742
-      objects at root). Anonymous `ListBucket` is denied on this bucket, so do
-      not build the merge on unauthenticated listing; `collection.json`'s own
-      item links are the credential-free fallback
-- [ ] **Dry-run gate before any S3 write:** generate `collection.json` locally
-      and assert it carries ≥ 9,741 existing item links plus the new ones, and
-      that its bbox contains the published extent
-      `[-126.96, 53.98, -125.74, 54.74]`. Do not proceed on a shrunken extent
-- [ ] Keep `aws s3 sync` free of `--delete` so no existing object can be removed
+- [ ] Back up the published `collection.json` to S3 and locally **before any
+      write** — it is the one irreplaceable object in the bucket
+- [ ] Record the baseline: item-JSON count on S3 and `/search` count over the
+      original watershed
+- [ ] `05_stac_register.py` — read the union of `data/centroids/*.parquet` (B4);
+      merge new item links with the published ones (authenticated bucket listing
+      as ground truth, `collection.json` as the credential-free fallback);
+      recompute extent over the union
+- [ ] Stamp `airphoto:footprint_basis` on new items so a future DEM rebuild is a
+      delta rather than archaeology
+- [ ] `--out <dir>` dry-run mode; assert as code that the old item hrefs are a
+      subset of the new, the new bbox contains the published bbox, and running
+      twice is idempotent
+- [ ] Sync JSONs in a pass without `--size-only` (G1); never `--delete`
 
 ## Phase 5: Run the three AOIs end to end
 
-- [ ] Run `se_a`, `se_b`, `se_c` through fetch → georef → COG → tag
-- [ ] Upload to S3 and regenerate the merged collection
-- [ ] Register on geopro via `stac_register-pypgstac.sh`
-- [ ] Confirm `/search` returns items over each new AOI, and that a query over
-      the original watershed still returns its items
+- [ ] Run `se_a` through fetch → georef → COG → tag as a single-AOI smoke test
+- [ ] Dry-run the collection merge and check the assertions before the first sync
+- [ ] Run `se_b` and `se_c`; confirm frames shared between A and B were fetched
+      once, not twice
+- [ ] Upload, register, then sync again (B1)
+- [ ] Register on geopro; confirm `/search` returns over each new AOI **and**
+      still returns the baseline count over the original watershed
 - [ ] Confirm the live collection extent covers both regions
-- [ ] Update `scripts/README.md` and `CLAUDE.md` for the AOI parameter, the new
-      selection step, and the per-AOI paths
+- [ ] Update `scripts/README.md` and CLAUDE.md
 
 ## Validation
 
-- [ ] Existing AOI resolves to the same polygon and same item set as published
+- [ ] Existing AOI resolves to the same polygon as the published collection implies
 - [ ] `/search` returns items over all three new AOIs
 - [ ] Live collection extent covers both regions; existing 9,741 items intact
-- [ ] Per-AOI report produced for each of A, B, C
+- [ ] Per-AOI report produced for each of A, B, C, with a reconciling ledger
 - [ ] `/code-check` clean on each commit
 - [ ] PWF checkboxes match landed work; `/planning-archive` on completion
 
@@ -159,13 +209,10 @@ and nothing else.
 # published extent, before and after — must grow, never shrink
 curl -s https://images.a11s.one/collections/stac-airphoto-bc | jq .extent
 
-# item count before and after — must not fall below 9741
+# item count on S3 — must not fall below 9741
 aws s3 ls s3://stac-airphoto-bc/ | grep -c '\.json$'
 
-# search over a new AOI (bbox A)
+# search over a new AOI (bbox A), and over the original watershed
 curl -s "https://images.a11s.one/search?collections=stac-airphoto-bc&bbox=-116.0758,49.0953,-116.0635,49.1060" | jq '.numberMatched'
-
-# search over the original watershed — must still return items
 curl -s "https://images.a11s.one/search?collections=stac-airphoto-bc&bbox=-126.96,53.98,-125.74,54.74" | jq '.numberMatched'
 ```
-

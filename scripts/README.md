@@ -75,7 +75,7 @@ Every step checks for existing outputs and skips work that's already done. You c
 
 | Component | What's needed |
 |-----------|---------------|
-| R packages | `fly` (≥ 0.3.0), `fresh`, `terra`, `sf`, `dplyr`, `arrow`, `purrr` |
+| R packages | `fly` (≥ 0.5.0), `fresh`, `terra`, `sf`, `dplyr`, `arrow`, `purrr` |
 | Python (conda) | Environment `stac-airphoto-bc` with `pystac`, `rasterio`, `shapely`, `pyarrow` |
 | AWS CLI | Configured with write access to `s3://stac-airphoto-bc` |
 

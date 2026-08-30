@@ -20,7 +20,7 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 
 ## Architecture
 
-Built on [fly](https://github.com/NewGraphEnvironment/fly) (v0.3.0).
+Built on [fly](https://github.com/NewGraphEnvironment/fly) (>= 0.5.0).
 
 ### fly package provides
 
