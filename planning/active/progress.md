@@ -63,3 +63,14 @@ collection empty between the delete and the load (~10 min).
 - Round 1: 12 findings, all fixed
 - Round 2 (reviewing the fixes): 3 real bugs **inside** the round 1 fixes, plus one
   still-tautological assertion and two partial fixes — all fixed
+
+### Round 3 — convergence
+- One new finding, and it predates round 2 rather than sitting inside a round 2 fix:
+  `if published:` gated the merge and every assertion on truthiness, so a 200 whose
+  body was `null`/`{}`/`[]`/`false` took the replace-everything path with rc=0 and no
+  assertion able to fire. Fixed by validating the shape; all four bodies now abort.
+- Round 3 confirmed round 2's fixes hold: 24-cell temporal matrix clean, sub-extent
+  removal has no remaining consumer, `link_id()` gives 9,976 distinct ids over 9,976
+  live hrefs, and the assertions go red when the defect is restored.
+- Pass 1: 12 findings. Pass 2: 10, three of them inside pass 1's fixes. Pass 3: 1, none
+  inside pass 2's fixes. That is the convergence signal to stop.

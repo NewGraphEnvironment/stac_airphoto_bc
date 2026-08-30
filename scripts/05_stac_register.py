@@ -74,7 +74,20 @@ def fetch_published_collection(url: str):
     """
     try:
         with urllib.request.urlopen(url, timeout=60) as resp:
-            return json.load(resp)
+            data = json.load(resp)
+        # Validate the SHAPE, not the truthiness. main() gates the merge and
+        # every assertion on `if published:`, so a 200 whose body is null, {},
+        # [] or false would arrive as falsy, leave old_links empty, and take the
+        # replace-everything path with rc=0 and no assertion able to fire —
+        # --no-merge behaviour reached without --no-merge, against a bucket
+        # holding thousands of published items.
+        if not isinstance(data, dict) or "extent" not in data or "links" not in data:
+            raise SystemExit(
+                f"{url} returned 200 but not a STAC collection "
+                f"(got {type(data).__name__}). Refusing to treat that as "
+                "'no collection yet' — pass --no-merge if the bucket is really empty."
+            )
+        return data
     except urllib.error.HTTPError as exc:
         raise SystemExit(
             f"Could not read the published collection at {url} (HTTP {exc.code}).\n"

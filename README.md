@@ -63,11 +63,10 @@ Each COG carries embedded metadata (visible in QGIS layer properties):
 library(rstac)
 library(sf)
 
-# Neexdzii Kwa watershed as AOI
-aoi <- fresh::frs_watershed_at_measure(
-  blue_line_key = 360873822,
-  downstream_route_measure = 166030.4
-) |> sf::st_transform(4326)
+# AOIs come from the registry in scripts/aoi.R, not from constants here.
+# Swap the id for any other registered area — se_a, se_b, se_c.
+source("scripts/aoi.R")
+aoi <- aoi_resolve("neexdzii_kwa") |> sf::st_transform(4326)
 
 # Search for photos between 1965 and 1975
 q <- rstac::stac("https://images.a11s.one/") |>
