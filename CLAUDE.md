@@ -110,7 +110,8 @@ One STAC collection (`stac-airphoto-bc`), one item per physical photo (`airp_id`
 ### Known issues
 
 - Diagonal flight lines (~230°, ~45° bearings) may still have rotation issues (fly#26). Workaround: set `rotation` column per roll.
-- Collection rebuild with `fly_georef(rotation = "auto")` pending (#13)
+- The `fly_georef(rotation = "auto")` rebuild (#13) **shipped 2026-03-12**. A further
+  rebuild — fly 0.9, per-roll `rotation`, DEM-corrected footprints — is not yet filed
 - 249/9,990 photos missing thumbnail URLs in BC catalogue
 - **Digital frames are excluded.** `fly` (>= 0.4.0) will not size a footprint
   without a sensor width (fly#32). The Neexdzii Kwa items predate that and were
