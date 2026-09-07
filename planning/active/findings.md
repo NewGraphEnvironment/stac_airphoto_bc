@@ -119,6 +119,36 @@ namespace with no schema — fine for pgstac `query` / CQL2, but nothing validat
 is added in Phase 1; `requests` is not needed — `05_stac_register.py` already uses
 `urllib.request` and the backfill follows it.
 
+## The diagonal, measured on the population (2026-09-07)
+
+The issue asserts `georef_metadata_ind` and `patb_georef_url` are exactly
+equivalent. That was measured here on 2,671 rows from three small AOIs, which is
+not the population. `06_catalogue_fetch.R` re-measured it over all **9,976**
+published items:
+
+```
+                   has_patb_url
+georef_metadata_ind FALSE TRUE
+                  N  8201    0
+                  Y     0 1775
+off-diagonal rows: 0
+georef_metadata_ind neither Y nor N: 0
+```
+
+Perfectly diagonal, and the flag is 100% populated with `Y`/`N`. So:
+
+- `airphoto:georef_metadata` can be asserted **present on every item** by the
+  validator — a missing one is a defect, not an expected absence.
+- `patb_georef` asset present iff `georef_metadata` is true is a real invariant
+  over this collection, not an assumption carried from a subset.
+- 1,775 of 9,976 frames (17.8%) have a photogrammetric solution — higher than the
+  12.7% measured on the southeast AOIs alone.
+
+The catalogue query by `airp_id` reconciles exactly: 9,976 requested, 9,976
+returned, 0 missing, 0 unasked-for. `bcdata::filter(AIRP_ID %in% ids)` translates
+to a CQL `IN`; batches of 200, 500 and 1000 each returned exactly what was asked
+for in 1.2-1.6 s. The full run is 20 batches in 24 s.
+
 ## Errors Encountered
 
 | Error | Resolution |

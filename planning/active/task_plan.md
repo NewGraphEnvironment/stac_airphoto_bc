@@ -46,10 +46,10 @@ Reference implementation: `stac_orthophoto_bc/scripts/item_cog_backfill.py`
 
 ## Phase 3: Catalogue rows for the published items
 
-- [ ] `scripts/06_catalogue_fetch.R` — item ids from the published `collection.json`,
+- [x] `scripts/06_catalogue_fetch.R` — item ids from the published `collection.json`,
       batched `AIRP_ID %in%` query, writes `data/catalogue/published.parquet`
-- [ ] Reconcile requested vs returned ids; refuse on a shortfall
-- [ ] Measure and record the `georef_metadata_ind` x `patb_georef_url` cross-tab over
+- [x] Reconcile requested vs returned ids; refuse on a shortfall
+- [x] Measure and record the `georef_metadata_ind` x `patb_georef_url` cross-tab over
       all 9,976 rather than assuming the diagonal measured on 2,671
 
 ## Phase 4: Backfill the published items
