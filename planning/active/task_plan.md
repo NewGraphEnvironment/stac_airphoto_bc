@@ -37,11 +37,12 @@ Reference implementation: `stac_orthophoto_bc/scripts/item_cog_backfill.py`
 
 ## Phase 2: Wire into item generation
 
-- [ ] Widen the `meta_by_id` key tuple in `05_stac_register.py`
-- [ ] Replace the inline property loop with the shared module; keep `footprint_basis`
-- [ ] Merge `catalogue_assets()` into the assets dict
-- [ ] Report the count of `georef_metadata_ind` values that were neither `Y` nor `N`
-- [ ] Dry run to `/tmp/dry`; diff a sample item — new keys present, no existing value changed
+- [x] Widen the `meta_by_id` key tuple in `05_stac_register.py`
+- [x] Replace the inline property loop with the shared module; keep `footprint_basis`
+- [x] Merge `catalogue_assets()` into the assets dict
+- [x] Report the count of `georef_metadata_ind` values that were neither `Y` nor `N`
+- [x] Dry run to `/tmp/dry21`; diff **all 235** items, not a sample — new keys
+      present, nothing pre-existing changed or dropped
 
 ## Phase 3: Catalogue rows for the published items
 
