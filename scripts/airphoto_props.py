@@ -60,20 +60,44 @@ _ASSET_TITLES = {
     "flight_log": "Flight log page",
 }
 
-# Measured over 2,671 catalogue rows: calibration reports are all `.zip`, flight
-# logs all `.jpg` (scans of logbook pages), and PAT-B solutions split .zip/.ori/.csv
-# 240/85/15. Those counts are a fact about a third party's behaviour rather than a
-# contract this repo chose, so the media type is read off the URL and an
-# unrecognised suffix leaves `type` absent instead of asserting one nobody checked.
+# Suffixes measured over all 9,976 published catalogue rows, 2026-09-07:
+#
+#   patb_georef_url          .ori 731 (505 lower + 226 `.ORI`), .zip 547,
+#                            .csv 473, `.OR` 24        -- FOUR spellings, not three
+#   camera_calibration_url   .zip 1302
+#   flight_log_url           .jpg 8133
+#
+# `.OR` is the one that matters: an earlier version of this map was written from
+# 2,671 rows out of three small AOIs, where `.OR` does not occur at all, and 24
+# assets shipped with no media type. A suffix map is a fact about a third party's
+# behaviour, not a contract this repo chose, so it is read off the URL, measured
+# against the population rather than a subset, and an unrecognised suffix leaves
+# `type` absent instead of asserting one nobody checked.
 _MEDIA_TYPES = {
     ".zip": "application/zip",
     ".csv": "text/csv",
     ".ori": "text/plain",
+    ".or": "text/plain",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".pdf": "application/pdf",
     ".txt": "text/plain",
 }
+
+# Columns where 0 is a missing-value sentinel rather than a measurement.
+#
+# `ground_sample_distance` is the distance on the ground in CENTIMETRES that one
+# pixel represents (the catalogue's own column comment). Measured over 9,976
+# rows: 7,336 positive spanning 12-97, 2,167 null, and 473 zero — every zero a
+# `Digital - Colour` frame, and zero occurring on no film frame at all. A GSD of
+# 0 cm is not a value any sensor produces.
+#
+# The null guard above cannot see this. It fires on the 2,167 honest nulls and
+# misses every instance of the thing it exists for, which is the more dangerous
+# half: an absent key makes a consumer look elsewhere, while a published 0
+# satisfies every `is not None` test and reads as a measurement. `fly` sizes a
+# digital footprint from GSD, so the one consumer that matters most would take it.
+ZERO_IS_MISSING = ("ground_sample_distance",)
 
 
 def georef_metadata(value):
@@ -108,8 +132,12 @@ def catalogue_properties(meta: dict) -> dict:
 
     for field in CATALOGUE_PROPERTY_FIELDS:
         value = meta.get(field)
-        if value is not None:
-            props[f"airphoto:{field}"] = value
+        if value is None:
+            continue
+        # `is None` is not the whole of "missing" — see ZERO_IS_MISSING.
+        if field in ZERO_IS_MISSING and value == 0:
+            continue
+        props[f"airphoto:{field}"] = value
 
     georef = georef_metadata(meta.get("georef_metadata_ind"))
     if georef is not None:

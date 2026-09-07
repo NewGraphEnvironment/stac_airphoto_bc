@@ -97,6 +97,34 @@ def test_a_null_value_produces_no_key_rather_than_a_null():
     assert None not in props.values()
 
 
+def test_a_zero_ground_sample_distance_is_omitted_not_published():
+    """0 is a sentinel, not a measurement.
+
+    473 of 9,976 published rows carry it, every one a digital frame, and the
+    smallest real value is 12 cm. A null guard alone fires on the 2,167 honest
+    nulls and misses all 473 — and a published 0 is the worse half, because it
+    satisfies a consumer's `is not None` test and reads as a measurement.
+    """
+    props = catalogue_properties({**FULL, "ground_sample_distance": 0})
+    assert "airphoto:ground_sample_distance" not in props
+
+
+def test_a_real_ground_sample_distance_still_passes():
+    """The paired assertion: the sentinel guard must not eat real values.
+
+    Restoring the bug in either direction has to be visible, so the smallest
+    value measured in the population is pinned here.
+    """
+    props = catalogue_properties({**FULL, "ground_sample_distance": 12})
+    assert props["airphoto:ground_sample_distance"] == 12
+
+
+def test_zero_is_only_a_sentinel_where_it_was_measured_to_be_one():
+    """frame_number 0 is not in ZERO_IS_MISSING and must survive."""
+    props = catalogue_properties({**FULL, "frame_number": 0})
+    assert props["airphoto:frame_number"] == 0
+
+
 def test_a_missing_column_is_treated_like_a_null():
     """centroids.load_centroids pads absent columns, but a caller may not."""
     thin = {k: v for k, v in FULL.items() if k != "bcgs_tile"}
@@ -150,8 +178,16 @@ def test_every_asset_carries_the_metadata_role():
     [
         ("https://x/a.zip", "application/zip"),
         ("https://x/a.csv", "text/csv"),
+        # Every spelling below occurs in the published population, measured
+        # 2026-09-07: .ori 505, .ORI 226, .OR 24, .csv 473, .zip 547, .jpg 8133.
+        # `.OR` is the one an earlier map missed, because the three southeast
+        # AOIs it was written from contain none — a fixture that could not reach
+        # the failure mode. Varying the CASE of a suffix that is already handled
+        # does not test the suffix that is not.
         ("https://x/a.ori", "text/plain"),
         ("https://x/A.ORI", "text/plain"),
+        ("https://openmaps.gov.bc.ca/thumbs/patb_files/93BCFGJK.OR", "text/plain"),
+        ("https://x/a.or", "text/plain"),
         ("https://x/a.jpg", "image/jpeg"),
     ],
 )

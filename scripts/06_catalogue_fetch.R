@@ -39,10 +39,20 @@ COLLECTION_URL <- "https://stac-airphoto-bc.s3.us-west-2.amazonaws.com/collectio
 OUT_DIR        <- file.path("data", "catalogue")
 OUT_PATH       <- file.path(OUT_DIR, "published.parquet")
 
-# 500 ids per request. Measured against the live service: 200, 500 and 1000 all
-# return exactly what was asked for, in 1.2-1.6 s. 500 keeps the CQL filter well
-# inside any URL length limit while costing only 20 requests for the whole
-# collection, and it makes a truncated batch small enough to see.
+# 500 ids per request.
+#
+# `bcdata` POSTs the CQL form-encoded rather than putting it in the URL, so the
+# constraint is request-body size, not URL length. Measured against the live
+# service 2026-09-07: 200, 500, 818 and 1,000 ids each return exactly what was
+# asked for in 1.1-1.6 s; **1,050 fails** with "There was an issue sending this
+# WFS request", raised on the resultType=hits probe. So the ceiling is between
+# 1,000 and 1,050, and 500 has roughly 2x headroom — not the open-ended margin
+# an earlier version of this comment claimed.
+#
+# The failure is loud and deterministic, which is the good case. The dangerous
+# one is below: asking for more ids than exist returns HTTP 200 with FEWER rows
+# and no warning, so the reconciliation is what makes this safe, not the batch
+# size.
 BATCH_SIZE <- 500
 MAX_TRIES  <- 3
 

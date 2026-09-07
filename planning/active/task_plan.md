@@ -54,21 +54,40 @@ Reference implementation: `stac_orthophoto_bc/scripts/item_cog_backfill.py`
 
 ## Phase 4: Backfill the published items
 
-- [ ] `scripts/06_catalogue_backfill.py` — threaded, timed-out, additive-only,
-      writes to `--out-dir`, `--limit` for smoke runs
-- [ ] `scripts/06_catalogue_validate.py` — count, boolean presence, iff-diagonal,
-      subset invariant, pystac schema
-- [ ] Smoke run `--limit 50`, validator over it
-- [ ] Restore each defect in turn and confirm the *specific* guard message fires
-- [ ] Full run over 9,976; validator green
+- [x] `scripts/06_catalogue_backfill.py` — threaded, timed-out, writes to
+      `--out-dir`, `--limit` for smoke runs
+- [x] `scripts/06_catalogue_validate.py` — seven guards: COUNT, BOOLEAN,
+      DIAGONAL, VALUES, SENTINEL, ADDITIVE, SCHEMA
+- [x] Smoke run `--limit 50`, validator over it
+- [x] Full run over 9,976; validator green
+- [x] Restore each defect in turn and confirm the *specific* guard message fires
+
+### Fixed after the plan review (see findings.md)
+
+- [x] **`ground_sample_distance == 0` is a sentinel, not a measurement** — 473
+      items, every one digital, smallest real value 12 cm. Omitted, with a
+      SENTINEL guard counting straight off the raw column.
+- [x] **`.OR` is a fourth PAT-B spelling** — 24 assets shipped with no media
+      type because the map was written from three AOIs that contain none.
+- [x] Batch-size comment named URL length; `bcdata` POSTs. Real ceiling measured
+      at 1,000 OK / 1,050 FAIL.
+- [x] "Additive only" was a comment, not a check — now stated as what the
+      ADDITIVE guard enforces, with the measurement beside it.
+- [x] Validator warns `VACUOUS` when a guard could not have failed on the set it
+      was given.
 
 ## Phase 5: Promote, sync, register, document
 
-- [ ] Promote the validated tree into `data/stac/`, gated on the validator
-- [ ] `Rscript scripts/04_s3_upload.R`
+- [ ] `scripts/06_catalogue_promote.sh` — validate, promote, regenerate,
+      **validate the promoted tree**, sync. The gate must run on the bytes that
+      ship, not only on `--out-dir`.
+- [ ] Re-running `05_stac_register.py` before the sync is what keeps a stale
+      local `collection.json` from being pushed over the published one
 - [ ] Verify a published item over HTTPS carries the new properties and assets
 - [ ] Docs: CLAUDE.md, README.Rmd (+ rebuild README.md), scripts/README.md
-- [ ] Correct the issue body's stale "#6" pointer
+- [ ] Correct the issue body's stale "#6" pointer and its wrong-case tile example
+- [ ] Hand over the geopro pypgstac reload (destructive; not automated) with the
+      CQL acceptance query that proves the point of the issue
 
 ## Validation
 
