@@ -78,22 +78,22 @@ Reference implementation: `stac_orthophoto_bc/scripts/item_cog_backfill.py`
 
 ## Phase 5: Promote, sync, register, document
 
-- [ ] `scripts/06_catalogue_promote.sh` — validate, promote, regenerate,
+- [x] `scripts/06_catalogue_promote.sh` — validate, promote, regenerate,
       **validate the promoted tree**, sync. The gate must run on the bytes that
       ship, not only on `--out-dir`.
-- [ ] Re-running `05_stac_register.py` before the sync is what keeps a stale
+- [x] Re-running `05_stac_register.py` before the sync is what keeps a stale
       local `collection.json` from being pushed over the published one
-- [ ] Verify a published item over HTTPS carries the new properties and assets
-- [ ] Docs: CLAUDE.md, README.Rmd (+ rebuild README.md), scripts/README.md
-- [ ] Correct the issue body's stale "#6" pointer and its wrong-case tile example
+- [x] Verify a published item over HTTPS carries the new properties and assets
+- [x] Docs: CLAUDE.md, README.Rmd (+ rebuild README.md), scripts/README.md
+- [x] Correct the issue body's stale "#6" pointer and its wrong-case tile example
 - [ ] Hand over the geopro pypgstac reload (destructive; not automated) with the
       CQL acceptance query that proves the point of the issue
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
 - [ ] `/planning-archive` on completion
 
 ## Non-goals
