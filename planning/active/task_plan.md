@@ -29,11 +29,11 @@ Reference implementation: `stac_orthophoto_bc/scripts/item_cog_backfill.py`
 
 ## Phase 1: Shared property/asset module, tests first
 
-- [ ] Add `pytest` to `environment.yml` and install into the conda env
-- [ ] Write `tests/test_airphoto_props.py` — failing, before the module exists
-- [ ] Write `scripts/airphoto_props.py`: `catalogue_properties()`,
+- [x] Add `pytest` to `environment.yml` and install into the conda env
+- [x] Write `tests/test_airphoto_props.py` — failing, before the module exists
+- [x] Write `scripts/airphoto_props.py`: `catalogue_properties()`,
       `georef_metadata()`, `catalogue_assets()`
-- [ ] `pytest tests/ -q` green
+- [x] `pytest tests/ -q` green
 
 ## Phase 2: Wire into item generation
 
