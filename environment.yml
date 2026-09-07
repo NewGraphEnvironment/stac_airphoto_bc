@@ -16,3 +16,4 @@ dependencies:
       - pyarrow
       - tqdm
       - jsonschema
+      - pytest

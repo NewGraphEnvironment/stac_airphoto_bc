@@ -40,6 +40,7 @@ Built on [fly](https://github.com/NewGraphEnvironment/fly) (>= 0.5.0).
 | COG | `03_cog.R` + `03_cog_tag.py` | Convert to COGs (DEFLATE), embed GDAL metadata tags via rasterio |
 | STAC | `05_stac_register.py` | Generate items, **merge** into the published collection, validate |
 | S3 | `04_s3_upload.R` | Back up `collection.json`, then `aws s3 sync` (never `--delete`) |
+| Backfill | `06_catalogue_fetch.R` + `06_catalogue_backfill.py` + `06_catalogue_validate.py` + `06_catalogue_promote.sh` | Add the catalogue metadata to items published before #21, whose COGs are no longer on any machine here |
 
 Registration runs **before** the sync, so a run uploads its own STAC output.
 
@@ -73,7 +74,8 @@ Tags set via `03_cog_tag.py` (rasterio) because `terra::metags` can't persist cu
 
 ### Source data
 
-- BC Data Catalogue centroid layer: `airp_id`, `photo_date`, `scale`, `focal_length`, `flying_height`, `thumbnail_image_url`, etc.
+- BC Data Catalogue centroid layer: **29 columns**, all of them cached — `01_fetch.R` collects the whole row with no `select()`
+- Column semantics are documented by the source: `bcdata::bcdc_describe_feature()` returns per-column comments, which is where the GSD unit and the tile casing came from
 - ~97% of photos have thumbnail URLs (openmaps.gov.bc.ca/thumbs/ JPGs, ~1250x1250)
 - Grayscale (1 band) pre-1986, RGB+alpha (4 band) post-1986
 
@@ -92,17 +94,49 @@ One STAC collection (`stac-airphoto-bc`), one item per physical photo (`airp_id`
 ```json
 {
   "id": "695106",
-  "properties": { "title": "695106 — bc5281_084 — 1968-07-15" },
+  "properties": {
+    "title": "695106 — bc5281_084 — 1968-07-15",
+    "airphoto:georef_metadata": false,
+    "airphoto:media": "Film - BW",
+    "airphoto:bcgs_tile": "093l01044",
+    "airphoto:nts_tile": "093L01"
+  },
   "assets": {
-    "thumbnail": { "href": ".../thumbs/1968/bc5281_084_thumb.tif" },
-    "visual":    { "href": ".../scans/1968/bc5281_084.tif" }
+    "thumbnail":     { "href": ".../thumbs/1968/bc5281_084_thumb.tif" },
+    "visual":        { "href": ".../scans/1968/bc5281_084.tif" },
+    "flight_log":    { "href": "...logbooks/...jpg", "roles": ["metadata"] },
+    "patb_georef":   { "href": "...patb_files/...", "roles": ["metadata"] }
   }
 }
 ```
 
+### Catalogue metadata on items (#21)
+
+Ten `airphoto:` properties and three `metadata`-role assets, built by
+`scripts/airphoto_props.py` — the single source both the generator and the
+backfill read, so they cannot drift.
+
+| property | note |
+|---|---|
+| `scale`, `focal_length`, `flying_height`, `film_roll`, `frame_number` | predate #21 |
+| `media` | the catalogue's film/sensor, e.g. `Film - BW` |
+| `georef_metadata` | **boolean.** `Y`/`N` in the catalogue; `bool("N")` is `True`, so the coercion is explicit and anything else omits the key |
+| `ground_sample_distance` | **centimetres.** `0` is a missing-value sentinel (473 digital frames; smallest real value 12) and is omitted, not published |
+| `bcgs_tile` | lowercase, e.g. `093l01044`; mixes 1:20,000 / 1:10,000 / 1:5,000 |
+| `nts_tile` | uppercase, e.g. `093L01` |
+| `footprint_basis` | from `fly`, not the catalogue; absent on items published before #16 |
+
+Assets `patb_georef`, `camera_calibration` and `flight_log` link the catalogue's
+retrievable files. Their contents are **not** parsed — see Known issues.
+
+Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
+1,775, `patb_georef` 1,775, `camera_calibration` 1,302, `flight_log` 8,133.
+`georef_metadata_ind` and `patb_georef_url` are perfectly diagonal.
+
 ### Caching strategy
 
-- `data/centroids_raw.parquet` — cached BC Data Catalogue query (gitignored, re-query with `force_refresh = TRUE`)
+- `data/centroids/<aoi>.parquet` — cached BC Data Catalogue query, one per AOI (gitignored, re-query with `FORCE_REFRESH = TRUE`)
+- `data/catalogue/published.parquet` — catalogue rows for every **published** item id, for the backfill; keyed to the live `collection.json`, so re-fetch it rather than reusing an old one
 - `fly_filter()` re-runs fresh each time (footprint estimates may change)
 - `fly_fetch(overwrite = FALSE)` skips existing files on disk
 - `03_cog.R` skips existing COGs; `03_cog_tag.py` skips already-tagged COGs
@@ -113,6 +147,17 @@ One STAC collection (`stac-airphoto-bc`), one item per physical photo (`airp_id`
 - The `fly_georef(rotation = "auto")` rebuild (#13) **shipped 2026-03-12**. The
   successor — fly 0.9, per-roll `rotation`, DEM-corrected footprints — is #23
 - 249/9,990 photos missing thumbnail URLs in BC catalogue
+- **PAT-B files are linked, not parsed** (#21). They arrive in four spellings —
+  `.ori`, `.ORI`, `.zip`, `.csv`, `.OR` — keyed three different ways (by
+  `airp_id`, by `roll_frame`, and by an internal photo number we have no join
+  for), and they are **shared bundles**: 1,775 items point at **12** distinct
+  files, so an asset href does not identify which record inside the file is this
+  frame. Reading them belongs with #23, which needs the exterior orientation to
+  produce a corrected footprint.
+- **`HEAD` is not a liveness probe for `openmaps.gov.bc.ca`.** It answers 404 for
+  URLs a ranged `GET` serves 206 for, including flight logs `fly::fly_fetch()`
+  downloads successfully. A HEAD-based check would report every metadata asset
+  in the collection dead.
 - **Digital frames are excluded.** `fly` (>= 0.4.0) will not size a footprint
   without a sensor width (fly#32). The Neexdzii Kwa items predate that and were
   sized as 9-inch negatives — `bcd12008` ships an 11,435 m footprint against

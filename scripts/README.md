@@ -58,7 +58,47 @@ To add an area, add an entry to `aoi_registry()`. Nothing else changes.
 | 3b | `03_cog_tag.py` | Stamp each COG with descriptive metadata (photo ID, date, scale, roll/frame) that shows up when you inspect the file in QGIS or any GDAL tool — called automatically by step 3a |
 | 4 | `04_s3_upload.R` | Sync COGs to the S3 bucket, uploading only new or changed files |
 | 5 | `05_stac_register.py` | Create a STAC catalog record for each image (location, date, properties, download link) and validate the whole collection |
+| — | `airphoto_props.py` | Turns a catalogue row into `airphoto:` item properties and `metadata`-role assets. Imported by both step 5 and the backfill so the two cannot disagree; not run directly |
 | — | `test_pipeline.R` | Run a 100-photo sample through the full pipeline to verify everything works after code changes |
+
+## Backfilling items published before a metadata change
+
+Steps 1-5 only ever rewrite items whose COG is on the machine running them. When
+a change adds a property, every item published from a machine that no longer has
+its COGs keeps the old shape — the collection then answers a question for part of
+its coverage and silently not for the rest. These four scripts close that gap
+(built for #21; reusable for the next one).
+
+| Order | Script | What it does |
+|------|--------|--------------|
+| 1 | `06_catalogue_fetch.R` | Take the item ids from the **published** `collection.json` and fetch a catalogue row for each, by `airp_id`, in batches of 500. Refuses unless every requested id comes back |
+| 2 | `06_catalogue_backfill.py` | Fetch each published item over HTTPS, add the new properties and assets, write to `--out-dir` (default `data/stac_patched/`). Touches nothing live. `--limit N` for a smoke run |
+| 3 | `06_catalogue_validate.py` | Seven guards — COUNT, BOOLEAN, DIAGONAL, VALUES, SENTINEL, ADDITIVE, SCHEMA. ADDITIVE re-fetches the live items, so it can actually disagree with the writer |
+| 4 | `06_catalogue_promote.sh` | Runs all of the above in the one order that is safe, validates again on the promoted tree, then syncs |
+
+```bash
+Rscript scripts/06_catalogue_fetch.R
+conda run -n stac-airphoto-bc python scripts/06_catalogue_backfill.py
+bash scripts/06_catalogue_promote.sh          # or --no-sync to stop before S3
+```
+
+Two things worth knowing before you use `--limit`:
+
+- Item links are sorted by href, and the first item with a photogrammetric
+  solution is at index **1915** — so a smoke run smaller than that contains no
+  `patb_georef` asset at all and the DIAGONAL guard compares two constants. The
+  validator prints `VACUOUS:` when this happens rather than letting a green
+  partial run read as evidence.
+- The sync is not the end. pgstac still holds the old items until the collection
+  is re-registered on geopro, and that script deletes before it reloads.
+
+### Property casing, because pgstac `=` is case-sensitive
+
+`bcgs_tile` is **lowercase** (`093l01044`) and mixes 1:20,000, 1:10,000 and
+1:5,000 mapsheets in one column; `nts_tile` is **uppercase** (`093L01`). Both are
+the catalogue's own convention, confirmed against
+`bcdata::bcdc_describe_feature()`. `ground_sample_distance` is in **centimetres**
+and is omitted where the catalogue holds `0`, which is a missing-value sentinel.
 
 ## Data Flow
 
@@ -76,6 +116,10 @@ s3://stac-airphoto-bc/thumbs/{year}/*
 data/stac/{airp_id}.json              (one record per photo)
 data/stac/collection.json             (collection-level summary)
 ```
+
+Note the numbering does not match the run order: `04_s3_upload.R` runs **after**
+`05_stac_register.py`, so a run publishes its own STAC output. The `06_*` scripts
+are a separate, occasional path rather than a sixth step.
 
 ## Re-running is Safe
 

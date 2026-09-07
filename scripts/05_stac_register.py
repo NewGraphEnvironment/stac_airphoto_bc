@@ -38,9 +38,29 @@ from rasterio.warp import transform_bounds
 from shapely.geometry import box, mapping
 
 sys.path.insert(0, str(Path(__file__).parent))
+from airphoto_props import (  # noqa: E402
+    CATALOGUE_PROPERTY_FIELDS,
+    METADATA_ASSET_FIELDS,
+    catalogue_assets,
+    catalogue_properties,
+    georef_metadata,
+)
 from centroids import load_centroids  # noqa: E402
 
 # --- Config ---------------------------------------------------------------
+
+# What each catalogue row must carry into build_items(). The property and asset
+# columns are taken from airphoto_props rather than restated here: a second copy
+# of that list is one fact derived twice, and the two part company the first time
+# a field is added to only one of them. Everything below the first line is what
+# THIS script needs and airphoto_props does not — geometry, the datetime, and the
+# title.
+CENTROID_FIELDS = (
+    *CATALOGUE_PROPERTY_FIELDS,
+    *METADATA_ASSET_FIELDS.values(),
+    "georef_metadata_ind",
+    "airp_id", "photo_year", "photo_date", "longitude", "latitude",
+)
 
 BUCKET = "stac-airphoto-bc"
 S3_REGION = "us-west-2"
@@ -125,11 +145,8 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
 
     for i in range(n):
         aid = centroids["airp_id"][i]
-        meta_by_id[aid] = {k: centroids.get(k, [None] * n)[i] for k in (
-            "airp_id", "photo_year", "photo_date", "scale", "focal_length",
-            "flying_height", "film_roll", "frame_number", "longitude",
-            "latitude",
-        )}
+        meta_by_id[aid] = {k: centroids.get(k, [None] * n)[i]
+                           for k in CENTROID_FIELDS}
         url = centroids.get("thumbnail_image_url", [None] * n)[i]
         if url:
             stem = url.rstrip("/").split("/")[-1].rsplit(".", 1)[0]
@@ -141,6 +158,7 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
 
     items = []
     unmatched = 0
+    unrecognised_georef = []
 
     for cog_path in thumb_cogs:
         stem = cog_path.stem
@@ -189,17 +207,29 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
                 roles=["data", "visual"],
             )
 
+        for key, asset in catalogue_assets(meta).items():
+            assets[key] = pystac.Asset(
+                href=asset["href"],
+                title=asset.get("title"),
+                media_type=asset.get("type"),
+                roles=asset["roles"],
+            )
+
         properties = {
             "proj:epsg": native_crs.to_epsg(),
             "proj:bbox": list(native_bounds),
             "proj:shape": [height, width],
             "proj:transform": transform,
         }
-        for key in ("scale", "focal_length", "flying_height", "film_roll",
-                    "frame_number"):
-            val = meta.get(key)
-            if val is not None:
-                properties[f"airphoto:{key}"] = val
+        properties.update(catalogue_properties(meta))
+
+        # Neither Y nor N. Counted and reported rather than aborted: the column
+        # was Y/N on every row measured, so a third value is upstream drift over
+        # one frame, not a reason to drop a run. The property is simply absent,
+        # which the collection-wide validator then refuses.
+        if georef_metadata(meta.get("georef_metadata_ind")) is None:
+            unrecognised_georef.append(
+                (airp_id, meta.get("georef_metadata_ind")))
 
         if airp_id in basis_by_id:
             properties["airphoto:footprint_basis"] = basis_by_id[airp_id]
@@ -232,6 +262,14 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
 
     if unmatched:
         print(f"  WARN: {unmatched} COGs had no metadata match and were skipped")
+    if unrecognised_georef:
+        print(f"  WARN: {len(unrecognised_georef)} item(s) carry a "
+              f"georef_metadata_ind that is neither Y nor N, so "
+              f"airphoto:georef_metadata is absent on them:")
+        for aid, val in unrecognised_georef[:10]:
+            print(f"    {aid}: {val!r}")
+        if len(unrecognised_georef) > 10:
+            print(f"    ... and {len(unrecognised_georef) - 10} more")
     return items
 
 

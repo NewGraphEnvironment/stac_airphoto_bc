@@ -71,6 +71,15 @@ Run end-to-end: `bash scripts/run_pipeline.sh`
 
 Each COG carries embedded metadata (visible in QGIS layer properties): `AIRP_ID`, `PHOTO_DATE`, `SCALE`, `FILM_ROLL`, `FRAME_NUMBER`, `FOCAL_LENGTH`, `FLYING_HEIGHT`, `FILENAME`.
 
+Every item also carries the BC Data Catalogue's own metadata as queryable `airphoto:` properties --- `media`, `bcgs_tile`, `nts_tile`, `ground_sample_distance` (centimetres), and `georef_metadata`, a boolean saying whether a published photogrammetric solution exists for that frame. 1,775 of 9,976 frames have one. Where the catalogue links a retrievable file --- the PAT-B solution, the camera calibration report, the scanned flight log page --- it appears as an asset with a `metadata` role, so a client can fetch it without a second trip to the catalogue.
+
+```r
+# frames with a photogrammetric solution
+rstac::stac_search(
+  q, collections = "stac-airphoto-bc", limit = 100
+) |> rstac::ext_filter(`airphoto:georef_metadata` == TRUE)
+```
+
 <br>
 
 ## Query with rstac
