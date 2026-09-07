@@ -421,6 +421,16 @@ silent direction is the dangerous one.
   `printf` the resolved path from inside the backgrounded shell so the parent can
   read it from output.
 - Hit twice in one floodplains session (2026-08-27) launching detached runs.
+- **The same shape makes `$!` the wrong PID, and that failure hands you a plausible
+  number instead of an error.** `mkdir -p "$D" && : > "$D/rss.txt" && Rscript job.R &`
+  then `PID=$!` gives the *list's* subshell, not `Rscript` — so a sampler built on it
+  (`ps -o rss= -p $PID`) records the shell. Measured 2026-09-05 in drift#62: 39 samples
+  alternating 3104 / 1488 KiB, from a run whose R process peaked at 14.2 **GiB**. Nothing
+  errors, the trace is well-formed, and it was committed as the evidence record before a
+  reviewer compared its peak against the other three groups'. Start the long command
+  **alone** — `Rscript job.R > "$D/run.log" 2>&1 &` on its own line, every `mkdir`/`: >`
+  before it — and sanity-check the first sample's magnitude against what the job should
+  use, because the wrong-PID trace is off by three orders of magnitude and looks fine.
 
 ### `gh` CLI
 - **`gh pr create` resolves branch from CWD, not `--repo`**. Specifying `--repo NewGraphEnvironment/X` does NOT switch branch resolution — the command still reads the current working directory's checked-out branch. To open a PR in repo X, `cd` into X's checkout first, or pass `--head <branch>` explicitly.
@@ -601,6 +611,42 @@ all_pids="$all_pids $!"
 ...
 for pid in $all_pids; do wait "$pid" 2>/dev/null || true; done
 ```
+
+### A `pgrep -f` waiter matches its own command line, so it never exits
+
+`until ! pgrep -f "job" >/dev/null; do sleep 30; done` is the obvious way to wait for a
+background job, and it cannot terminate: the loop's **own** command line contains the
+string `job`, so `pgrep -f` finds the waiter itself and the condition stays true after
+the real process is long gone.
+
+It fails quietly and expensively. Nothing errors, the job finishes normally, and the
+waiter spins until something kills it — so a session that launched three of them for
+three stages sits waiting on a stage that ended, with the log on disk saying `Done`.
+Measured 2026-09-06 in rtj: two waiters were still looping after their refresh had
+written its completion block, and `pgrep -fl` showed each matching only *the other
+waiter and itself*.
+
+Wait on the **PID**, which cannot self-match:
+
+```bash
+nohup Rscript long_job.R > run.log 2>&1 &
+PID=$!
+while kill -0 "$PID" 2>/dev/null; do sleep 30; done
+```
+
+`kill -0` tests for existence without signalling. Note the `&`-binding trap above —
+assign `PID` on its own line, and start the long command alone, or `$!` is the
+subshell's.
+
+Where only a pattern is available, exclude the waiter explicitly (`pgrep -f "job" |
+grep -v $$`), or match on something the loop's own text does not contain — but the PID
+is the form that has no failure mode.
+
+**Diagnose it with `pgrep -fl`, not `pgrep -f`.** The count alone says "still running";
+the listing shows *what* matched, and a waiter matching itself is obvious the moment
+you can read the command lines. This is the refinement of `always-away.md`'s "check
+`pgrep` before declaring a run dead": checking is right, and looping on the check is
+where it goes wrong.
 
 ### `timeout` is GNU coreutils — a portable deadline
 
@@ -893,6 +939,43 @@ The honest failure mode is that this rots because nobody runs it: run the probe 
 session start beside the CI scan, schedule it unattended, and commit the results per
 host so any machine can see what the others measured. Implementation is kdot#37 (soul#69).
 
+### An amd64-only image needs `--platform`, and it works on your machine because it is cached
+
+`docker run` resolves from the local image store before it reaches a registry, so on an
+arm64 Mac an amd64-only image runs fine once pulled — **and the command that pulled it is
+not necessarily the one in the code.** Measured 2026-09-05, macOS/arm64:
+
+```
+$ docker run --rm qgis/qgis:4.2 echo hi
+docker: no matching manifest for linux/arm64/v8 in the manifest list entries
+$ docker run --rm --platform linux/amd64 qgis/qgis:4.2 echo hi
+hi
+```
+
+It fails on a clean machine, a new laptop, CI, or after `docker system prune` — never on
+the machine it was written on. The tell is a `docker run` in code beside a `docker pull`
+in a README or a test helper, where only one carries the flag.
+
+That split is the usual shape: rfp's **test harness** passed `--platform linux/amd64` and
+resolved a pinned digest, while three **runtime** call sites did neither, so the shipped
+functions worked only while a rolling tag happened to be cached (rfp#282). A container
+invocation in test code and in runtime code are two invocations of one operation, and only
+the test one runs in CI — build the argv in one place.
+
+Two adjacent settings worth reading before blaming emulation for being slow, both **off by
+default** and both one checkbox:
+
+```bash
+python3 -c "import json;d=json.load(open('$HOME/Library/Group Containers/group.com.docker/settings.json'));
+print({k:d.get(k) for k in ['useVirtualizationFrameworkRosetta','useVirtualizationFrameworkVirtioFS']})"
+```
+
+`useVirtualizationFrameworkRosetta` false means x86_64 containers run on QEMU when Rosetta
+is available on the host; `useVirtualizationFrameworkVirtioFS` false puts bind mounts on
+gRPC-FUSE, which is the slow path for the many-small-file reads a container workload
+usually opens with. Check the Docker Desktop version too — 4.17.0 was still installed on a
+macOS 26.2 machine, so the Rosetta support present was its earliest form.
+
 
 # Code Check Conventions
 
@@ -946,6 +1029,7 @@ fire and one that must not. A guard nobody has seen fail is decoration.
 | 2026-08-29 | stac_dem_bc | **A guard must not fail toward "abort" either** — 98,040 items, 2 transient failures, exit non-zero skipped the publish and the manifest recording 98,038 successes was never committed; retry in-process before an error can reach the exit code, gate on a rate against a stated tolerance tested against both answers, persist progress on the failure path (`if: always()` in CI), and ask which direction the failure costs more |
 | 2026-08-29 | rfp | **A grep that cannot show a failure is not a check** — `cmd \| grep -E "added"` matched the line printed one statement before `Error: could not find function`; the work was then finished by hand, hiding that the driver had not |
 | 2026-08-31 | link | **A search that finds nothing has proven nothing until it has found something** — `\b` unsupported on macOS grep; an IP-address audit returned empty and was written into an issue as "no IPs in any tracked file" |
+| 2026-09-07 | rtj#296 | **On a broken host the diagnostic tools are casualties too, and their empty output reads as a finding** — `nm -gU $LIB \| grep -c _XPCTypeBool` returned `0`, reported as "the library does not export it". `/usr/bin/nm` is itself an `xcode-select` shim broken by the very bug being diagnosed: it never ran, stdout was empty, and `grep -c` counted nothing. The same session reported a package receipt as absent because `pkgutil` is not on a non-interactive ssh PATH. Both conclusions happened to be right, which is what let them stand. **Run the tool by absolute path from a known-good root** (`/Library/Developer/CommandLineTools/usr/bin/nm`), **capture stderr separately, and require a positive control** — the real `nm` printed 2664 symbols, so `0` was legible as broken rather than as an answer |
 | 2026-09-01 | trap#18 | **A guard nothing corroborates has to count, not match** — `all(grepl(ok, v))` is TRUE for an empty `v`; the xpath needed `xml_ns_strip()` and without it found 0 of 600; only a count turned the tests red |
 | 2026-08-31 | link | **A guard placed mid-operation can be defeated by the operation itself** — a clean-tree precondition placed after the run writes its own logs; fired on every real run, for a reason unrelated to what it guarded |
 | 2026-08-31 | link | **A job that writes into its own tracked output directory poisons every dirty-check** — a provenance `dirty` flag set on all 21 dispatcher rows, every one false; the flag then carries no information and readers ignore the column; match the predicate to the subject — `git status --porcelain --untracked-files=no -- . ':(exclude)path/to/logs'`, long-form exclude because an aborted status reads as clean, `--untracked-files=no` decided deliberately since it also hides a new source file — and read provenance back against independently measured ground truth |
@@ -959,6 +1043,10 @@ fire and one that must not. A guard nobody has seen fail is decoration.
 | 2026-09-03 | link#278 | **A driver default that selects a methodology, a data scope or a deployment target answers a question nobody asked** — distinct from an ordinary default: `verbose = FALSE` is a preference, `config = "bcfishpass"` picks which of two biological methodologies you shipped, and the tell is that the alternative would also have run cleanly and produced different, equally plausible numbers. Fifteen drivers in one package defaulted to a parity config while the operator expected the package's own, so six watershed groups were modelled on the wrong methodology into a product line already seventeen deep, caught by an offhand question afterwards. Worse when the default is *named* like the safe one (`bcfishpass` vs a config literally called `default`). The remedy is not a policy fixing each answer; it is **removing defaults that silently answer for you**: make the argument required, and where a default must stay, print the resolved decision at start-up with the alternative named. Review question for any driver diff: does this fallback choose a method, a scope or a target? A fleet sweep of the shape is soul#178 |
 | 2026-09-04 | floodplains#77 | **Widening a guard is how it starts refusing correct content, and case-insensitivity is the cheapest way in** — a catalogue-fact grep was widened after missing 5 of 12 restatements, and the new latitude pattern `\b\d{1,3}\.\d+\s*[NS]\b` ran under `re.IGNORECASE`, so `[NS]` also matched a lowercase **s**: `0.39 s`, a timing figure from the repo's own notes, was refused as a collection extent. Compile flags **per pattern**, not per sweep. Two habits that caught it: keep a **negative control set** of sentences the repo legitimately writes and assert they still pass, and check *what the guard reads* — this was the one arm of three not stripping `<script>`, so an embedded bootstrap payload with 30 CSS durations (`.15s`) sat one leading digit from failing a page that was fine |
 | 2026-09-05 | stac_floodplains_bc#61 | **A currency gate read from the artifact the assertion pins downgrades FAIL to SKIP** — a byte-identity assertion pinned a built `meta.json`'s digest and gated itself on that same file's `produced_datetime`, so it would skip whenever upstream had re-run. Any regression that moved or nulled that field — a broken provenance read, a lost section, a rename — therefore made the gate skip **under a message blaming upstream**, on the one arm that exists to notice the code moving the artifact. Read a currency gate from the independent source it is really about (the producer's own file), never from the subject. A pin needs one gate per **independent input** to the digest, too: the same assertion's second gate covers the local sf/GDAL/PROJ triple, because the areas and geometry inside that file are computed on the machine that runs it, and an ungated toolchain difference FAILS rather than skipping |
+| 2026-09-05 | rfp#281 | **A render or export API returns Success when its inputs silently failed to load** — `QgsLayoutExporter.exportToImage()` returned `ExportResult.Success` for a report figure whose basemap and every remote raster were missing: under `--network none` the same project read **42 invalid layers against 18** and exported in 3.6 s against 9.5 s, with the same return code both times. The result code answers *did the writer run*, never *is the output what was asked for* — and the degraded output is a plausible picture, so nothing downstream looks wrong either. Same for a missing font, an unresolved image path (three logos rendered as red-X placeholders, still Success) or a layer whose style failed to load. **Gate on the count of inputs that failed to resolve, not on the return code** — and gate it *differentially*, since real projects arrive already carrying some (18 here before anything was driven), the same reasoning as `.qgs_dangling_refs()`. The rendering sibling of "A wrapper's exit is not the work": there the wrapper lies about the work, here the work lies about itself |
+| 2026-09-05 | floodplains#83 | **The one destructive step is the one that must not go unchecked, and `file.rename()` returns FALSE rather than erroring** — a repair verified four properties before replacing a file and then discarded both renames' return values. Measured with the target made immutable so only the rename could fail: it reported `Repaired 1 of 1`, exited **0**, and left the file carrying the tags it existed to remove — while the summary's `FAILED (left untouched)` line became uncontradictable, since the one state where it is false could never enter the failed set. Same family as `file.copy()` above, one verb over, and worse because it is the *last* step: everything before it aborted safely. Where two files must move together, rename the one whose failure moves nothing **first**, and report a half-completed pair as exactly that rather than as a success |
+| 2026-09-06 | drift#67 | **A content hash computed at the END of a run stamps the file as it finished, not as it ran** — a `script_sha` written where the metadata is assembled records the state of the source *after* any mid-run edit, so a uniformity check across parallel outputs sees one value and accepts two definitions of the same measurand. That is the guard against mixing versions failing toward pass, on the one thing it exists to catch, and it was live: the file genuinely was edited between group runs. Hash at the **start**, beside the run timestamp, and use the captured value. `digest(file =)` errors loudly on an unresolvable path, so a bad working directory stops rather than writing NA. Generalises to any provenance stamp — git SHA, config digest, tool version — read at write time rather than at read time |
+| 2026-09-07 | stac_airphoto_bc#21 | **A domain sentinel is a third state beside value and null, and a null guard is blind to it by construction** — `ground_sample_distance` came back `0` on 473 of 9,976 catalogue rows, every one a digital frame, against a smallest real value of 12 and a column the source documents as centimetres. `if value is not None` fired on the 2,167 honest nulls and missed **every** instance of the thing it existed for. The direction is what makes it expensive: an absent key sends a consumer elsewhere, while a published `0` satisfies that consumer's own `is not None` and reads as a measurement — and the library that sizes footprints reads exactly that field. Nothing downstream could catch it either: the property namespace carries no schema, so the artifact validated clean. **Ask what the producer writes for "missing" before trusting a null check** — `0`, `-9999`, `""`, `1900-01-01` — and once a sentinel is known, pin the count of omissions against the **raw** column: a guard that derives its expectation through the same rule the writer used moves with the bug instead of catching it (measured: the first version of that guard fired on all 473 *correct* omissions, which is the same defect pointed the other way) |
 | — | — | **Silent Failures** — `\|\| true` hides real errors; an empty variable before `rm`/`destroy` needs `[ -n "$VAR" ] \|\| exit 1`; `grep` returning empty feeds downstream silently |
 
 ### A fixture that cannot reach the failure mode
@@ -980,6 +1068,7 @@ favourable** member of the population, computed, not the vivid one you remember.
 |---|---|---|
 | 2026-08 | link#227 / fresh#214 | **A fixture set that cannot reach the failure mode is not validation** — 8 hydrology fixtures all compared groups with *differing* stream codes; the bug fires only between groups sharing one; the next case tried dropped the group the whole Fraser drains through |
 | 2026-08 | rfp#139 | **A negative-case fixture rots when the positive set grows** — a refusal test picked EPSG:4326 because nothing supplied it; shipping an `<srs>` for a tracking layer made it resolvable and the test failed blaming the code; assert the premise beside the property |
+| 2026-09-02 | fly#26 | **An assertion invariant under the transformation you are adding stays green while its premise dies** — a film-footprint regression net pinned shape two ways, area and bbox aspect. Rotation preserves area exactly, and a rotated square's bbox is still a square (`w = h = s(|cos b| + |sin b|)`), so both survived the change that falsified their stated premise ("Square, so unrotated") and the test kept passing while measuring nothing. The fixture was fine — it is the **assertions** that could not see it. Before adding a transformation, ask of every existing assertion whether it is invariant under that transformation; what discriminated here was ring vertex 1's azimuth from the centroid, `bearing + 225`, which pins angle, sign and vertex order together |
 | 2026-08-27 | flooded#40 | **A comparison test proves nothing if the fixture makes both sides identical** — grouping by `gnis_name` vs `blue_line_key` was a bijection in the test data, so the two runs were the same run with different labels |
 | — | water-temp-bc#23 | **Test fixtures must mirror production column TYPES, not just shapes** — fixtures had `Grade` as string, production has double; a `coalesce(Grade, '')` sentinel passed 27 tests and broke on first contact |
 | 2026-09-01 | stac_floodplains_bc#23 | **A cross-item consistency check cannot see a defect that hits every item** — a uniform-key validator measures variance; keying a new asset by a stem that was already a key would have overwritten a raster in every item and every check would pass; pair with one absolute assertion |
@@ -987,7 +1076,9 @@ favourable** member of the population, computed, not the vivid one you remember.
 | 2026-08-31 | floodplains | **A per-tenant key looks global whenever your test data has one tenant** — `patch_id` numbered within sub-basin; five areas had one sub-basin each, so it was observably unique; the only 13-sub-basin area had 2032 rows and 1973 distinct ids, a 6% mis-apportionment; ask what the id is unique *within* and prefer the composite (`patch_id`, `name_basin`) even where today's data makes the extra column redundant |
 | 2026-08-30 | fly#38 | **Check a threshold against the least favourable case, computed — not a remembered example** — tolerance set to 1.10 against a remembered 0.442; the binding case was 0.0949, `log(1.10)` is 0.0953, 0.4% too loose, and it let through the one input it existed to catch |
 | 2026-08 | rfp#168 | **Mocking the transport means the request is never built** — `local_mocked_bindings(.do_http=)` gives full coverage of response handling and none of the request; the wrong content type returned 400 on every Overpass endpoint with 130 tests green; make the wire format a pure function and assert it offline |
+| 2026-09-07 | stac_airphoto_bc#21 | **A prefix of a sorted list is not a sample** — `--limit 50` over a collection whose item links are sorted by href produced 50 items identical in every dimension the change introduced: the first frame with a photogrammetric solution sits at index **1915**, so the smoke set held 0 `true`, 0 of one asset and 0 of another, and the iff-diagonal guard compared two constants. It passed green on a set where it could not fail — and the restore-the-bug proofs were first run against that same set, so they proved nothing about half the guards. `head -n`, `[:N]` and `LIMIT` without `ORDER BY` all produce this; the tell is a smoke set whose summary counts are all 0 or all N. Take a **stratified** set and assert its composition before running, or prove the guards against the full run where it is affordable. The general remedy is cheap and worth having anyway: make vacuity visible — print `VACUOUS: <guard> — <arm> never ran` when the set leaves an arm unreachable, so a green partial run cannot be mistaken for evidence |
 | 2026-09-02 | floodplains#64 | **A fixture that varies the artifact but not the reader tests nothing reader-dependent** — two GeoTIFFs with different containers, both read with the same terra in the same process, digests asserted equal; delete both normalization lines and all nine assertions still passed, because storage type only varies with what the *reader* does, and the real trigger was a `.aux.xml` sidecar beside one file that the fixture had no reason to model; closed by asserting the property on plain vectors with no file I/O — name the axis the guard exists to test, then check the fixture actually varies it |
+| 2026-09-05 | rfp#265 | **An early return can make the defect unreachable for every input anyone exercises** — the fixture-blindness above with the short-circuit inside the code under test rather than in the data. `_project_files()` returns at `if (version is None or version == head)`, so a **HEAD read never executes the next line** — which passed a project *path* where the client wants a UUID. Measured with a control: `<project>@HEAD` returned 1029 files and `<same project>@HEAD-1` 404'd, as did an unrelated project's own `HEAD-1`, so it was the version and not the project. Every caller had only ever read HEAD, so a whole pinning design downstream worked by coincidence and would have broken the next time anyone bumped a version. The correct call sat 130 lines up in the same file **with a comment explaining it**, which is the tell that the branch was never walked rather than never understood. Ask which branch a realistic input takes before trusting a green suite, and test the case the early return skips — here a read at `HEAD - 1`, since a HEAD read structurally cannot fail |
 
 ### A proxy is not the property
 
@@ -1015,6 +1106,7 @@ name it and observe it. Measure the sign of a correlation before trusting it.
 | 2026-08-30 | fly#32 | **Do not branch on a value only some code paths populate** — `sized <- !is.na(half_side)` is a property of which route ran first; three conditions in one function each broke on the same `NA`-by-construction fact; batch-dependence is the confirming symptom; the remedy is distinct from the proxy's — derive the predicate from inputs known before any route runs, not a truer measurement |
 | 2026-08-31 | gq#76 | **A premise check satisfied by the happy path's own structure is decoration** — `any(dir.exists(paths))` is TRUE whether or not the sweep recursed, because top-level dirs are always present; restore the defect and watch the premise fail |
 | 2026-09-01 | link#250 | **Asserting a proxy instead of the property passes on the defect** — a pool's width asserted through its job count; 3 jobs at width 8 and at width 10 both write 3 result files and exit 0, so the assertion passed against an octal bug that halved the width — the proxy was blind to it, not merely compressing it; derive the property exactly: each job appends `+` on start and `-` on end (single small appends, atomic under `O_APPEND`), then `awk '$0=="+"{n++; if(n>m)m=n} $0=="-"{n--} END{print m+0}' events` is the width actually used, and with the bug restored it reports `ran 8-wide, expected 10`; ask whether your assertion could tell the property from a neighbouring value — if two widths produce identical observations, it is about something else |
+| 2026-09-07 | drift#72 | **A combined evidence score is a proxy for its parts, and it is wrong in opposite directions depending on whether they are independent — so measure that first** — merging independent legs discards what each knew, and merging dependent ones counts the same measurement twice; both surface as one plausible number with no way to tell which happened. drift had both, measured, in the same dataset: #62 Q4 found the geometric and temporal legs independent to nearly independent (clean-break share 0.494 vs 0.575, 0.490 vs 0.621, 0.518 vs 0.515) and concluded *"neither leg predicts the other well enough to stand in for it — a patch needs both tags"*, while #67 found date agreement and the sustained/endpoint split are **one measurement read two ways** (*"the split is `break_year` thresholded … do not report them as two corroborating legs"*). Keep one named column per axis and let the consumer rank; where a strength already exists as a number (`pmin(n_before, n_after)`, 1-3 here), publish it rather than its threshold — a boolean derived from it is the lossy form, and nothing downstream can recover what it dropped. Corollary on **grain**: an aggregate row is not a place, so a spatial attribution cannot attach to one however the vocabulary grows — `Trees -> Rangeland, break, 2019, 13,480 cells` spans a whole floodplain, and asking which fire it was has no answer at that row. Check the grain before designing the column |
 
 ### Verification that reads its own output
 
@@ -1083,6 +1175,10 @@ not by a reviewer saying you have converged: the class recurs one axis over, and
 | 2026-09-01 | stac_dem_bc#34 | **A guard that fires correctly and then points at the wrong fix** — four on one branch: an id-mismatch guard telling the operator to repoint `STAC_BUCKET_URL` at a bucket they already had (the bucket had not moved, only the collection); a deterministic both-keys failure reported as "transient, RE-RUN" when every re-run raises the identical error; a message promising "the run still publishes what it completed" on the path where the exit code discards it. Ask what someone would *do* on reading it, not whether the guard fired |
 | 2026-09-05 | stac_floodplains_bc#61 | **A guard that says "this would reach X" must read X's own exclusions, not enumerate the source** — a new arm compared each published item's whole directory against its assets and reported every extra file as one that "would reach the public bucket". The release syncs with `--exclude '.*' --exclude '*/.*' --exclude '*.json' --exclude '*.aux.xml'`, and its own comment records why: macOS drops `.DS_Store` into item directories and GDAL writes PAM sidecars when a read triggers statistics. So the guard would have **refused a release** over a file that provably cannot ship — opening the folder in Finder was enough — while telling the operator to delete something the transport already ignores. The fix is not a hardcoded skip-list but reading the patterns out of the shipper (here `catalogue_release.sh`), the same way a timestamp pin is read from the one file that defines it: a second copy is one fact derived twice and the two part company at the first edit. Assert the parse rather than trusting it — an empty pattern set fails toward refusal (loud), but one containing a bare `*` blesses everything, so reject that by name. **And check what already covers the thing you just sanctioned**: a `.aux.xml` here is still refused, by the guard that names the real defect (the RAT is not embedded) rather than claiming a bucket leak |
 | 2026-09-01 | flooded#47 | **Deriving a guard's key is not the fix for hardcoding it — when the key is a judgement, deriving it inverts the guard** — the contract-vs-third-party sentence above, read as "never hardcode", produces the opposite defect, and the wrong version looks careful. A **set** (which layers exist, which columns a schema declares) has a source of truth to derive from; a **judgement** (which column means drainage area, which basemap is opaque) has none, and keying it to whatever a formal or default holds today couples the guard to a value free to move for unrelated reasons. A guard keyed to `formals(fl_stream_rasterize)$field` — commented *"derived from the formal rather than hardcoded, so the two cannot drift"* — inverted completely when only that formal was corrected: false alarm on the right input, silence on the actual defect, a self-contradicting message. The two that must not drift are the guard and *the wrong column*, so key it to the literal `"channel_width"`. And the test does not save you — its premise line reddens, but reads as "the default changed, update the expected name", and that repair leaves the suite green with the guard pointing the wrong way: a failure toward the **wrong fix**, not toward pass (soul PR #136) |
+| 2026-09-05 | rtj#293 | **A guard outlives the upstream behaviour it was written against, and its continued refusing reads as correctness** — a refresh driver refused to run whenever the project root held a `.geojson`, then deleted every one after its passes, because an upstream script ran `rm -f *.geojson` there. That script had since been removed upstream and the intermediate moved to a `tempfile()` workdir, so **the only thing deleting those files was the guard's own sibling cleanup** — a matched pair defending nothing. Nothing signals this: a guard that refuses looks exactly as correct on its last day as its first, and here it blocked the work on three of four projects and sent the design toward a keep-list nobody needed. **Five documents asserted the dead premise** — two READMEs, a CLAUDE.md, an ops doc and two code comments — which is the shared-ancestor problem in `karpathy.md` with the guard itself as the loudest witness. Before designing around a constraint a guard encodes, **read the upstream that imposed it**, not the guard or the prose describing it; a one-line `grep` for the script named in the comment ended it. Sibling of the vendored-witness row: there the copy went stale, here the *world* moved and the guard did not |
+| 2026-09-06 | rtj#285 | **A guard that returns the offenders and lets the caller build the complement will have the complement built wrong, on the branch that fires** — a `.qml` check correctly scoped to a split-layer directory returned only the offenders; the call site then captioned *every* `.qml` on the server as "elsewhere, untouched by the split" and `basename()`-stripped it, so the one offending file printed indistinguishably from a benign root sidecar precisely when the guard FAILED. The helper was right, and the seven tests written with it all drove the helper in isolation, so restoring the defect left them green. "Write the partition down beside the guard" (the stac_floodplains_bc#26 row above) is not enough when the guard hands back half of it: **return the partition** — `list(bad, other)` — so "the halves are disjoint and together cover everything" becomes a property a test holds rather than a convention the call site has to remember; the three assertions written that way fail on the old composition and the helper-only ones do not. The original scope was itself the coincidence this mechanism names: the check passed only because the single project it had ever run against carried no `.qml` anywhere, while the other three carried 7, 3 and 4 |
+| 2026-09-06 | rtj#298 | **A guard against a silent drop must be keyed to the OUTCOME, not to the flag that caused it** — the conjunction of the row above and the rfp#243 row, and it cost three review rounds on one PR. A refresh driver gained `--only=` and `--types=`; `--add=` combined with `--only=` silently dropped the added layer, so a guard was written as `setdiff(add, only)`. It closed `--only` and left `--types` wide open — the types branch zeroes a non-matching type's refresh AND add, so `--add=<aws layer> --types=bcdata` refreshed 29 layers and dropped the requested one without a word (measured live). A per-flag rule has to be re-derived for every narrowing flag, and the third one misses again; `setdiff(add, kept)` — *did what was asked for survive?* — cannot, whatever narrows the run. **And the tests could not see either version.** The one written for it drove the validator directly, which has no type information, so it passed trivially; then deleting the **call site** left all 86 checks green, because every assertion drove the extracted helper. Two things closed that: a structural assertion that the driver still calls its extracted decision (`grepl("check_adds_survived", deparse(plan_refresh))` — weak, but it always runs and catches the deletion that happened), and an end-to-end arm through the driver against a real project, reported as SKIPPED rather than passed when absent. Both end-to-end arms then failed on the *good* file — **including the positive control**, which is what said it was the harness and not the guard: a sourced dependency was missing. With only the negative arm it would have read as the guard being broken |
+| 2026-09-06 | rfp#293 | **A remedy is a claim about a second system, so fixing it in one message leaves it standing in every sibling — and correcting one made a function contradict itself.** Four functions refused when a layer name did not identify one layer, all ending in some spelling of *"resolve via `rfp_qgs_rename()`"*. None could: that function renames **every** copy, so the name asked for survives on none — `Duplicate layer names in source` becomes `Layer(s) not found in source`, and the theme writer writes **four themes without the basemap they name** while reporting them added, a bigger number that reads as success. Review round 2 corrected the `stop()`; round 3 found the same remedy in the roxygen ten lines away, which is where a user actually looks; round 4 found it in three sibling messages, one of them now contradicting its own docs. **Fixing instances is what kept it alive for four rounds.** The remedy is structural — one internal constant holding the sentence, plus a test asserting each caller reaches it and carries no copy of the old wording, proven by reverting each site — and it generalises past error messages: the same unexecuted-claim class lives in roxygen, code comments, test comments claiming what a test pins, and CLAUDE.md. **Terminate by enumerating the claims, not by another round**: list every statement the diff makes about behaviour elsewhere, by the place it lives, and execute each. Eighteen rows the first time, of which the single row marked "read" rather than "measured" was the one that was wrong |
 
 ### A fix lands in one of two callers that share a harness
 
@@ -1191,6 +1287,7 @@ Read the exit status, not just the output.
 |---|---|---|
 | 2026-07 | floodplains | **A wrapper's exit 0 is not "the work completed" — gate on in-band error + output mtime** — a Pass-2 change declared "12.4×, byte-identical" and merged; the run had halted before writing, so the A/B compared the unchanged baseline against its own backup |
 | — | — | **pipefail with ssh+tee** — `ssh … \| tee log` returns tee's exit; remote work skipped, notification said completed |
+| 2026-09-05 | floodplains#79 | **A `\|\| fallback` after a pipe is unreachable, so an absence probe prints nothing and reads as "checked"** — the sibling consequence of the row above, and worse because there is no wrong output to notice. `ls .github/workflows/*.yml 2>/dev/null \| sed 's/^/  /' \|\| echo "none — CI is n/a"` takes its exit from `sed`, which succeeds on empty input, so the `echo` never runs: the step emitted **nothing at all** and was one glance from being recorded as "no CI, nothing to watch" on a merge that had in fact dispatched a run. The tell is a branch that is supposed to *always* print something printing nothing. Test the command, then format: `if ls … >/dev/null 2>&1; then …; else …; fi`, or assign first and branch on the value. Same fix as the guard rows above — assign, test the status, then test the value — but the shape hides here because the `\|\|` looks like the guard rather than the thing that needs one |
 | 2026-08 | — | **Never silence stderr on a mutating command, and never chain one with `;`** — `git mv … 2>/dev/null; mv …` succeeded doing the wrong thing and the failure surfaced one command later as "cannot stat" |
 | 2026-08-29 | stac_dem_bc | **A progress bar on stderr silently eats your log lines** — per-item `logger.warning` beside tqdm; failing ids unrecoverable from the log locally and in CI |
 | 2026-08-30 | rfp#227 | **Merging stderr into stdout corrupts the stdout you are parsing** — a 145-field JSON line with `QObject::killTimer` spliced into it after a year of working on 20-field payloads; and the fix's temp file was unlinked before the assertion that needed it |
@@ -1247,11 +1344,13 @@ every widening broke and every narrowing held.
 | 2026-09-01 | flooded#52 | **A claim flagged as under-evidenced gets repaired by widening, and widening is what breaks** — six review rounds, 36 findings; every fix added a quantifier over a ragged dataset×resolution×lineage grid; terminated by reproducing the old behaviour to the digit and measuring every row |
 | 2026-09-03 | rtj#243 | **A defect rate is a claim about the population filter first, and the subject second** — a photo-reference audit reported 142 of 290 references (49%) dangling on the server, which flipped a design conclusion and was one command from being written into another repo's issue as fact. The filter for the *reference* side was right; the filter for the *server* side required the path to contain a `photos/` directory, so every image stored elsewhere was invisible and counted as missing. Re-run on all image extensions, case-insensitive: **6 of 290, 2%** — and those six reconciled exactly to an already-filed issue about bare filenames. A 49% failure rate in a shipped project was the tell, and the reconciliation that catches it is cheap: **count both sides of a ratio with independently-justified filters, and re-run the denominator's filter one notch looser before believing a rate**. Sibling of the positive control above — here the control is a *second, more lenient* population, not a known-good item |
 | 2026-09-05 | rfp#275 | **A differential baseline stops being one the moment the parent moves** — a branch suite was compared against a baseline measured earlier the same session, at a commit that had since stopped being the branch point: another session shipped a release into `main` in between. The comparison still *ran*, still produced two numbers, and would have attributed six failures on a parent that no longer existed. Re-run at the real branch point the counts moved 4409 → 4711 on the baseline side alone. **A baseline is only valid against `git merge-base HEAD origin/main`**, so in a shared checkout re-derive it at push time rather than reusing the one taken at branch time — and note the failure direction: the stale baseline was *lower*, which flatters the branch. Sibling of "a measurement carries the time it was taken", where what expired is the reference rather than the reading |
+| 2026-09-06 | rfp#282 | **An instrument that is not stable within one version cannot speak to the difference between two — and it reads as a regression or as equivalence with equal confidence.** Smoke-testing two container versions before pinning one, the written style differed on a colour and read as a version regression; the same image run twice differed identically, because the renderer mints a symbol with a random colour. Then the *other* script's PNG came out byte-identical across the two versions and that was written into the findings file as the gate's evidence — also luck, since two runs at one image are not byte-identical either. **Both directions in one session**, on one gate. Re-measured on painted-pixel count, which is stable within a version: 7779 across three runs at each. The discriminating test is one command and precedes every A/B: **run the same image twice before comparing two of them.** Distinct from the stale-baseline row above — there the reference expired, here the *ruler* is noisy — and from a proxy, which is stable but measures the wrong thing. The tell is a difference you cannot explain mechanically, or an agreement too clean for something with a random component in it |
 | 2026-09-04 | rtj#282/#283/#284 | **And the filter can be right while the *predicate* is wrong** — the refinement of the row above, met three times in one session on one number. A photo manifest reported 142 of 290 present; the count then moved to 35, to 11, to **0 genuinely lost**, and no step was an arithmetic error. First the resolver named three directories photos were known to live in and the project also had a fourth. Then the denominator included **form-template placeholders** — six dummy filenames on a worked-example record, which is why three different projects reported *exactly six* missing, a tell sitting in my own summary table unexamined. Then the predicate itself: `exists in the project directory` was standing in for *is this photo safe*, while photos are **deliberately moved off** to control project size — so the check penalised the housekeeping it should encourage, on the gate that precedes destroying a generation. **Ask what the predicate is a proxy for before trusting the rate**, and when several independent subjects report an identical count, that equality is the finding. Each correction came from workflow knowledge no amount of re-measuring would have supplied — so when a rate survives one correction, ask who else knows what the number means |
 | 2026-09-05 | rfp#268/#271 | **When you cannot list, read the PRODUCER — "unlistable" is not "unknowable"** — a bucket answered `403 AccessDenied` to a list (correct for a `s3:GetObject`-only policy), so the artifact was reported as unconfirmable and a shipped feature was documented as blocked on it, with a follow-up issue filed saying so. The job that writes the object recorded the exact key in its own source; one `HEAD` on it returned **200, 66,635,819 bytes, staged the previous day**. The reasoning was "guessing a key is the construct-the-sibling-path antipattern" — true of a key *derived from a pattern*, and the opposite of true for one *read from the code that writes it*, which is that rule's own remedy. **Before concluding an artifact's presence is unknowable, grep the producer for the path it writes**; and treat a self-filed "blocked on X" as a claim to check rather than a conclusion, since nothing downstream will ever re-test it |
 | 2026-09-04 | rfp | **An error naming its own remedy, mapped onto a remembered failure instead of read** — a memory note said `op read` "times out on authorization"; the actual error was `couldn't connect to the 1Password desktop app… update to the latest version and restart the app`, and the app was running with `--just-updated --should-restart`. Not a timeout, not an authorization problem, and the fix was in the text. Cost: the *preferred* documented route was abandoned for the last-rank fallback, the user was escalated to, and then the credential's **name** was doubted — it had been right all along. Two tells, both cheap: the error prescribed an action nobody took, and the remembered failure mode had a different **shape** (a hang) than the one observed (an immediate error). **Read the error's own words before matching it to a prior**, and when a convention ranks routes, confirm the preferred route's prerequisite is genuinely absent rather than merely erroring once |
 | 2026-09-03 | drift#48 | **A sibling guard that passes is only a control if it was pinned before the event** — two frozen cache-key goldens, one red and one green, and the green one was read as evidence that the shared inputs were fine. It was not: it had been **re-pinned after** the environment moved, so it could only ever agree. Recomputing its *contemporaneous* predecessor showed that value had moved too, which flipped the diagnosis from "one key's inputs changed" to "the hash function changed under all of them" and changed the fix entirely. The filed issue had reasoned from the green tick and named the wrong cause. **Before treating a passing sibling as a control, date its pin against the event** — a guard re-pinned afterwards is a photograph of the new world, not a witness to the old one. Same family as the vendored-witness rule below, arriving through a re-pin rather than a stale copy |
 | 2026-09-04 | knowledge#4 | **A per-project config file can shadow the user-level one entirely, so the value you read is not the value that loads** — a repo-root `.Renviron` holding one line made R skip `~/.Renviron` completely, and every `PG_*`, `AWS_*` and `GITHUB_PAT` came back empty for any R process started in that repo. The symptom accused the world: `invalid integer value "NA" for connection option "port"`, which reads as a broken database config. `grep` on `~/.Renviron` showed the variable set, so the file was believed and the code doubted. **The positive control is the same command from a different working directory** — `PGPORT` was `5432` from `~` and empty from the repo, which localises it in one step. R, direnv, npm, git and ssh all resolve config by a search order in which a nearer file wins, and several stop at the first hit rather than merging. Ask *which* file actually loaded before trusting any variable's absence, and note the redundant-shadow shape: the offending file duplicated a value already set in `.Rprofile`, so it added nothing and hid everything |
+| 2026-09-05 | floodplains#83 | **A comparison whose two sides differ in something other than the treatment indicts the wrong thing** — `gdal_edit.py -unsetmd` was measured destroying a raster's band category names, rejected for it, and that verdict written into a commit message and a script header. It does not: the test had copied the `.tif` **without** its `.aux.xml` and compared it against an original that had one, so the categories were never present to lose. The tell is the one this mechanism already names — a long-shipped tool reported broken — but the fix is upstream of "print a positive control": **enumerate what differs between the two sides before attributing the difference to the treatment.** A copy is a treatment. So is a different directory, a fresh sidecar, a warm cache. Cheap discipline: state the intended single variable out loud, then list every other way the two sides were produced |
 | 2026-09 | rfp | **Write the numbers last, against the final tree** — a figure written into prose mid-change is measured against a tree that no longer exists by the time the prose ships, and the second actor is usually *you*, one commit later: *"I had even reordered the phases to write prose against the final state — and then changed the state again."* The time-stamping rule in `karpathy.md` §7 warns about measurements staled by an earlier session; this is one staled by your own later work inside a session. When a fix lands after the prose, re-measure rather than assuming the prose still holds (soul#176) |
 
 ### Written data outlives the fix
@@ -1281,6 +1380,7 @@ exit status; pin only what has no other identity; resolve an identifier once per
 | — | drift#25 | **Cache keys must cover every output-affecting input** — rasters cached as `<source>/<year>.nc` with no AOI in the key; a second watershed received the first's raster masked to its extent, ~3% overlap looking plausible enough to almost ship; hash *resolved* values, sf geometry as WKB (`st_as_binary(…, endian = "little")`) with the CRS as a separate key member, `as.numeric()` first because `10L` and `10` hash differently, and canonicalize the geometry before serializing it (ring order and orientation are not fixed by topology — `code-check-spatial.md`) — and check the `force` escape hatch actually overwrites: drift#25's `force = TRUE` errored on the existing file, so prefer the writer's `overwrite = TRUE` over a bare `unlink()` |
 | 2026-09-01 | link#264 | **Making an optional field mandatory breaks every producer that legitimately left it empty** — four producers, three fine, the fourth `update_hosts.sh` installing from a tarball with no `Remote*` fields; the rejection landed after cloud instances were paid for |
 | 2026-09-01 | link | **Teaching a build or install step to record provenance is a change to a safety-critical path** — `R CMD INSTALL \| tail -3` wrote the pin for a build that failed; an env pin beat a checkout's own git state; nothing expired it; five findings inside one ~40-line fix |
+| 2026-09-05 | drift#62 | **A fix to a derived number does not reach the artifacts that already quoted it, and the ones outside the repo are the ones nobody re-reads** — a review replaced `100 / pct_sustained` (dividing an already-rounded share) with `changed_ha / sustained_ha`, and the generator was re-run, so every committed CSV and the note moved. Two GitHub issue bodies filed an hour earlier under a heading naming that same CSV kept the pre-fix cells, and the note asserted they carried the numbers. Nothing in the repo can see them: they are prose, in another system, and the tables *looked* current because three of four cells were unchanged. Same mechanism as a published record surviving a writer fix, arriving as **published prose** rather than as data — and worse, because a tracker body is what the next person plans from. Two habits: **when a derived value changes, enumerate every artifact that quotes it** — repo prose, release notes, PR descriptions, issue bodies in every repo you filed into — and **verify a filed body against the artifact it names by parsing it**, not by reading it, since `5.08` against `5.09` survives any number of careful re-reads |
 | 2026-08 | gq#57 | **An inventory is only complete relative to a boundary — name the boundary** — 9 lines in 6 files, verified twice, complete for gq; consumers read `soul/skills/cartography`, which shipped its own snippet naming the broken provider |
 | 2026-08-31 | flooded; flooded#49 | **A defect's magnitude is dataset-specific — measure it where it lands** — a 3.59x depth error measured as ~2x area on the 10 m fixture and 16% on the 30 m production watershed; percent-of-AOI moved 27.51 → 27.50 — but a ratio is stable only when its denominator is inside the affected region too: floodplain-as-percent-of-watershed fell 8.67 → 7.35 on the same defect, the same ~15% as the hectares, because the watershed does not shrink, and three report appendices publishing that ratio beside the absolute needed both numbers restated; ask what is in the denominator before calling a proportional claim safe |
 
@@ -1336,6 +1436,7 @@ request treated as evidence, and assert it at a size larger than any plausible d
 | — / 2026-07-30 | — / mdb-export | **Counting lines: `wc -l` and `grep -c` fail in opposite directions** — `grep -c` returned 1 for 102,460 single-line JSON records; `wc -l` reported 556 lines for 517 records with embedded newlines, and the number reached a README; use a `count_lines()` helper (`grep -c ''` with `\|\| n=0`) checked against all four inputs — empty, unterminated, terminated, missing — and parse records inside a structured file rather than counting lines |
 | 2026-08-30 / 08-31 | stac_dem_bc; STAC catalogue | **A paginated API's default page size silently truncates a lookup used as a check** · **A paged API's default `limit` reads as absence** — `POST /search` with 600 ids returned 10; `limit=200` reported two of sixteen surveys absent; paging returned 230 with every one present |
 | 2026-09-03 | rtj#259/#260 | **The set you compare against, derived from the artifact under test** — an acceptance script asserted a GeoPackage held only its form's own tables, and built "its own tables" from `st_layers()` on the *deployed* file. That listing includes the foreign table the check was hunting, so `setdiff()` came back empty and it passed on exactly the file it existed to flag; a fixture carrying `layer_styles` reported 0 failures until the set came from the *shipped* artifact instead. Not caught by four review rounds — found by running the check against a deliberately-bad fixture. **For a guard of the form "X contains only the expected set", the expected set must come from a producer the subject cannot influence**, and the same iteration must then walk the expected set rather than the subject's, or a *missing* member is invisible too |
+| 2026-09-06 | drift#67 | **One column NAME carrying different populations across files is the same defect as one fact derived twice, and it is harder to see because nothing is duplicated** — five review rounds on one script, each finding the next instance *inside* the previous round's fix. At its worst `area_ha` carried three populations across four CSVs (unclipped patch / clipped published row / evaluated-area), `n_patches` counted published rows in two files and vectorized patches in two others, and one weighted mean was published under a single name with two different weights. Each was locally correct; the reader combining two tables is the one who is wrong. Two habits: **compute the measurand, its weight and any stratum threshold on ONE population**, and where a boundary case is excluded from one table and included in another, publish the reconciling count rather than the difference. Terminate by **enumerating every derived column with its population and its precision** and showing none disagrees with its name — a quiet review round cannot close this class, because the columns are individually right |
 | 2026-09-04 | floodplains#77 | **A fix that derives one literal introduces another whose other half lives in a file the code never opens** — the mechanism behind four review rounds (7, 4, 7, 9 findings). Each round replaced a hardcoded value with one read from an artifact, added a new literal beside it, and wrote a *comment asserting the agreement* instead of a line checking it. Three of those comments were measurably false: `BYPRODUCTS` claimed to be `.gitignore`'s list and was missing two entries; a figure caption claimed to describe `config/disturbance.yml` while the cause list stayed hardcoded; and `nzchar()` claimed to filter empty cells it could not reach. **Terminate by partitioning every literal**, not by another round: a **contract this repo chose** must be hardcoded or the guard can never fail, and a **fact about another artifact** must be read from it or `stop()` on divergence — the two genuinely unavoidable ones carry a source-and-date stamp naming the file that makes them true. And enumerate *mechanically*: a curated list of 22 missed 7, all on one axis — literals inside strings that get **printed** (titles, captions, `fig.alt`) rather than inside values that get used, which is where a wrong caption hides because nothing consumes it |
 
 ## Rules that stand alone
@@ -1358,6 +1459,39 @@ General, and not an instance of a mechanism above.
   reads — issue bodies, PR text, planning. And when a long run fails, get the
   `file:line` before forming any theory: a mid-flight edit and a real regression
   look identical in a summary line.
+
+### Test a persistent change through its per-process override first
+
+A setting that is changed once and persists — `xcode-select -s`, a git config key, a
+registered default, an installed symlink — usually has an environment variable or flag
+that overrides it **for one process**. That override is a free experiment: it answers
+"would this fix it?" without sudo, without mutating the machine, and without anything to
+revert if the answer is no.
+
+Reach for it before proposing the persistent form, not after someone doubts you.
+
+```bash
+# proposed:  sudo xcode-select -s /Library/Developer/CommandLineTools
+# tested first, read-only, no sudo:
+DEVELOPER_DIR=/Library/Developer/CommandLineTools /usr/bin/python3 -c "import pyexpat"
+```
+
+Caught 2026-09-07 in rtj#296. A fix was proposed from inference, doubted on a plausible
+mechanism (the broken framework sat outside the directory being switched away from, so the
+switch might be a no-op), and a review was spawned to settle it — when one environment
+variable answered it in a single read-only command. The inference happened to be right; the
+cost was a review cycle and a recommendation the user was asked to trust on reasoning rather
+than evidence.
+
+The general shape: **before recommending a change someone else has to apply, find the
+cheapest thing that would falsify it.** A persistent setting with a per-process override is
+the easiest case, and the one most often missed because the override is documented as an
+advanced feature rather than as a test harness.
+
+Same family as "It can only be answered by testing is a claim with an author" in
+`karpathy.md`, pointed the other way: there the claim is that something *cannot* be cheaply
+tested, here it is that something *must* be applied to be tested. Both are worth one probe
+before being believed.
 
 ### Adopting Existing Config
 
@@ -1813,7 +1947,9 @@ immutable history and are never rewritten this way.
 **The failure mode that keeps recurring: research findings feel like
 commentary.** They are not — they are the spec. If a finding changes what
 someone would *build*, it belongs in the body, with the durable version in
-`research/` and the body linking to it.
+`research/` and the body linking to it. What `research/` holds, how a file is
+named and what its header carries is `planning.md`, "`research/` — what is
+known, outliving the issue that found it".
 
 **Bodies drift at the moment work finishes, not while it is in flight.** Four
 instances in a single day of rfp work, all of the same shape — the code learned
@@ -2765,7 +2901,97 @@ Three rules on those sections:
 attach to — `/planning-init` takes an issue number, and exploratory runs often *produce*
 the issues rather than follow them. That measurement belongs in the issue or PR it
 spawned, with the log directory's own README as the index. Do not build a third system
-to close this gap.
+to close this gap. The *finding* it settles goes where every settled finding goes —
+`research/`, next section — which is not a third record of the run but the one place its
+verdict is kept current.
+
+## `research/` — what is known, outliving the issue that found it
+
+Three homes, one job each: **the PWF archive is the story, committed logs are the
+measurements, `research/` is the durable verdict** — floodplains' `research/README.md`
+had that framing before this section existed. A research file holds what is now *known*: a
+settled method, a measured fact about an external system, a search that established an
+absence — so that someone picking the work up months later does not re-derive it.
+`planning/archive/<issue>/` holds what was *done*, in order, for one issue, and is rarely
+opened by anyone who never saw that issue. The research file is the one they will look for.
+
+What does **not** go there: a work log; a run record (Run / Hardware / Software /
+Configuration blocks — that is the archive README's `Measurement` and `Evidence`, above);
+the raw numbers (committed logs). Measured 2026-09-06 across the seven repos carrying a
+`research/`, 40 topic files: link's `provincial_parity_2026_05_*.md` are four run records in
+25 days, each dated by the run it records and carrying that run's setup and metrics, while
+its living documents, `bcfishpass_methodology.md`,
+`study_area_run.md` and `provincial_run_runbook.md`, are single files revised as the
+knowledge moved. The second shape is the one that moves the state of knowledge; the first
+duplicates the archive.
+
+### One topic file, revised in place — git is the version record
+
+`research/<topic>.md`, noun-first, **no date in the filename**. A new measurement that
+changes what is known revises the topic file; it does not add a dated sibling.
+`git log --follow research/<topic>.md` is the dated history, the archive README it cites
+is the *why*, and the logs are the numbers — everything an R&D claim needs, with no second
+copy of any of it.
+
+Existing dated files — `20260711_…`, `…_2026_05_25.md` — are **not renamed**. They are
+cited by path from `CLAUDE.md` files and from other conventions (`bookdown.md`,
+`karpathy.md` §7), and a rename breaks the citation the way it breaks log evidence
+(`newgraph.md`, "Which logs to commit"). Convergence is forward-only, and the README says
+when.
+
+### The header is the provenance, in prose
+
+No research file in any repo carries YAML frontmatter and nothing consumes it, so
+provenance is one line under the H1. floodplains' is the shape to adapt — it already carries
+the date and the issues, and names its log prefix in the body:
+
+```markdown
+**Date opened:** 2026-07-11 · **Issue:** #8 · **drift:** 0.6.0 (`dft_stac_fetch(tile_size=)`,
+drift#36) · **Status:** OPEN — design set, runs pending.
+```
+
+Three things the line must carry — `**Verified:** <date> · **Issues:** … · **Produced by:** …`
+is the minimal form:
+
+- **When it was last true.** The file's date, and a section-level date wherever one
+  section is re-verified alone. A research file whose numbers cannot be re-derived ages
+  into folklore, and one that states a scope or a quantity drifts silently when the code
+  moves — three link documents, two of them research files, asserted a recompute "runs over
+  every WSG in the schema" after two commits had changed it (`karpathy.md` §7, "Documents
+  that share an ancestor corroborate nothing"). When code changes a behaviour a research
+  file describes, grep `research/` for the sentence. Files written before 2026-09-06 gain
+  the line when next revised; no fleet sweep is required.
+- **What produced it.** The script path or log prefix for a measurement; the source list or
+  reference-manager collection for a literature review. Never a number without its producer.
+- **Which issues it came from and which it spawned.** The issue body links the research
+  file (`feature-workflow.md`, "Issue bodies get edited, not appended"); the research file
+  names its issues; and an archive README whose `Measurement` was distilled into a research
+  file links it. Both ways, every time — one direction leaves the other end unfindable.
+
+### The directory carries a README
+
+An index: one row per file, what it covers — rfp's is the model. Where other repos hold
+related work, a "Related work" list of links. Where two naming patterns coexist, the
+cutover line in the form `newgraph.md` uses for logs:
+
+```markdown
+Naming: `<topic>.md`, revised in place, from 2026-09-06.
+Files dated before that carry a `yyyymmdd_` prefix; they are not being renamed.
+```
+
+The README is the index. `CLAUDE.md` links the README once and cites an individual file
+only where a rule depends on it. Twenty-three topic files with no README and a `CLAUDE.md`
+citing four of them by path — link, measured 2026-09-06 — is the state this prevents.
+
+### R packages and public repos
+
+`research/` is top-level and excluded from the tarball: `^research$` in `.Rbuildignore`
+(`code-check-r.md`, "`R CMD build` ships every top-level directory not in
+`.Rbuildignore`"). Not `inst/notes/` or `inst/research/`, which ship inside the installed
+package — the three packages carrying those (eight files, 2026-09-06) migrate by issue,
+forward-only. In a package, `research/` is also where durable reference notes go, because
+`docs/` belongs to pkgdown and `inst/` ships. And a public tool repo's `research/` is
+public: report findings from internal work aggregated, never by the names of who it was for.
 
 ## Atomic Commits (Critical)
 
