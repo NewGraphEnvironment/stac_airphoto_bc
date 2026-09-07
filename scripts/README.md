@@ -59,6 +59,7 @@ To add an area, add an entry to `aoi_registry()`. Nothing else changes.
 | 4 | `04_s3_upload.R` | Sync COGs to the S3 bucket, uploading only new or changed files |
 | 5 | `05_stac_register.py` | Create a STAC catalog record for each image (location, date, properties, download link) and validate the whole collection |
 | — | `airphoto_props.py` | Turns a catalogue row into `airphoto:` item properties and `metadata`-role assets. Imported by both step 5 and the backfill so the two cannot disagree; not run directly |
+| — | `../tests/` | Unit tests for `airphoto_props.py` — the two coercions that fail silently (`Y`/`N` to boolean, and the `0` sentinel). Run with `conda run -n stac-airphoto-bc pytest tests/ -q` from the repo root |
 | — | `test_pipeline.R` | Run a 100-photo sample through the full pipeline to verify everything works after code changes |
 
 ## Backfilling items published before a metadata change
