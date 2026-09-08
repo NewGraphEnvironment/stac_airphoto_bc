@@ -290,3 +290,67 @@ now carried; the ledger is 15 columns.
 | Reported "88/88 georeferenced" as a success. It was the warm path over a populated tree, and the frames only wrote because fly's refusal was disarmed | Clear the outputs and measure the cold path. `code-check.md`, "Test the cold/create path of idempotent code, not just the warm no-op". |
 | Told the user a version ceiling was unnecessary because "fly already refuses loudly by itself" | Measurably false — the refusal was suppressed by the `rotation` column this pipeline supplies. Re-put to the user with the measurement. |
 | Three test assertions passed on text that was a comment or an input reference rather than a declaration | Strip comments before scanning, cut the transmute at `rejected_reason =`, and prove each with the mutation that defeated the original. |
+
+## Rounds 4 and 5: the guards were put where they could not run
+
+Round 4 found no bugs and named the residue as one axis — *"every remaining
+instance is a guard reading repo text or a repo literal where a real fly object is
+already in hand"* — and prescribed closing them all in the block that loads that
+object. Following that prescription introduced the next defect: **that block is
+gated on `data/centroids/se_c.parquet`, which is gitignored.** Exposure went from
+one assertion to five, and a fresh clone printed `All assertions passed.` while
+silently running none of them.
+
+Measured on a fresh-clone state (cache moved aside), before the fix:
+
+| mutation | with cache | fresh clone |
+|---|---|---|
+| `aoi_dem_coverage_min()` 0.95 → 0.42 | RED | **GREEN** |
+| drop `dem_coverage` from `aoi_footprint_cols()` | RED | **GREEN** |
+
+The close was to read fly's facts from the **installed package** rather than from a
+data file: `fly:::fly_dem_coverage_min()` for the threshold, and
+`deparse(fly::fly_footprint)` for the terrain vocabulary. Neither needs a cache, so
+both now run everywhere. Only `aoi_footprint_cols()`'s completeness genuinely needs
+a real window, and that skip is named and counted.
+
+After: a fresh clone runs **82** assertions against 77, names all four skips, and
+the summary reads `All assertions passed (4 skipped).`
+
+### One defect, five spellings
+
+The "is this stage guarded" scan was defeated four times in a row, each fix closing
+one spelling:
+
+| round | spelling | closed by |
+|---|---|---|
+| 2 | total removal | the scan itself |
+| 3 | whole-line comment | strip comment lines |
+| 4 | **trailing** comment on a code line | `deparse(parse(f))` |
+| 5 | mention inside a **string literal** | `all.names(parse(f))` — ask for a *call* |
+
+A wider regex was never the fix — `sub("#.*", "", line)` truncates a `#` inside a
+string literal, and `01_fetch.R` has one. Asking the parse tree for a symbol is the
+form with no next spelling: a string constant is not a symbol.
+
+### Other round-5 findings, all closed
+
+- **[bug]** `aoi_dem_coverage_min()`'s docstring had been inserted *inside*
+  `aoi_terrain_values()`'s, leaving the vocabulary undocumented and `0.95`
+  explained by an argument about terrain routes. Split.
+- The `tryCatch` around `fly:::fly_dem_coverage_min()` downgraded a fly **rename**
+  to a benign SKIP — disarming the pin on the one event that makes the copy stale.
+  Removed; a missing internal is now a failure.
+- A syntax error in any stage script aborted the suite uncaught, truncating ~30
+  assertions and skipping the summary. Now a named finding carrying the parse
+  error's line, and the run completes.
+- `expected_terrain` is kept but re-labelled honestly: it is a change-detector for
+  `aoi_terrain_values()`, not a validation of it. A duplicate of a guess cannot
+  check the guess — the fly-side pin does that.
+
+### Errors Encountered (rounds 4-5)
+
+| Error | Resolution |
+|-------|------------|
+| Followed round 4's prescription to close four literals in one block without checking that the block runs — it is gated on a gitignored cache | Read fly's facts from the installed package instead. The prescription was right about the axis and wrong about the location. |
+| Reported a mutation as "STILL GREEN" when the replacement had not applied — the anchor's whitespace had changed | A probe that reports no effect must first prove it took effect. Re-run with the real anchor: the guard fails correctly in both states. |

@@ -52,3 +52,19 @@
 - Added `aoi_terrain_values()` — an unrecognised fly terrain route now aborts
   instead of being silently classified.
 - Next: archive, PR.
+
+## Session 2026-09-07 (rounds 4-5, close)
+
+- Round 4: no bugs; verified all four of round 3's reductions were real, and named
+  the closing axis. Round 5: one bug (a docstring inserted inside another's) and
+  five fragility findings, every one **inside round 4's closures**.
+- The sharpest: closing four literals in the block that loads a real fly object put
+  them behind a **gitignored cache gate**, so a fresh clone ran none of them and
+  still printed "All assertions passed." Closed by reading fly's facts from the
+  installed package instead — no data file needed.
+- The "is this stage guarded" scan was defeated in four successive spellings
+  (removal, whole-line comment, trailing comment, string literal). Closed by asking
+  the parse tree for a *call* rather than the file for text.
+- Termination is measured, not asserted: a fresh clone now runs 82 assertions
+  against 77, and names and counts the 4 it cannot.
+- Five code-check rounds. Next: archive, PR.

@@ -16,6 +16,7 @@ suppressPackageStartupMessages({
 source("scripts/aoi.R")
 
 failures <- 0L
+skipped  <- 0L
 
 ok <- function(label, expr) {
   res <- tryCatch({
@@ -145,6 +146,30 @@ for (col in aoi_footprint_cols()) {
 # The cache is gitignored, so on a fresh clone this arm cannot run. Reported as
 # SKIPPED rather than quietly dropped: an absent arm and a passing one look
 # identical in a green summary, and this is the only assertion that drives fly.
+# --- Pinned against the INSTALLED fly, with no cache ----------------------
+# Both of these are fly's facts copied into aoi.R, and both were first written
+# behind the centroid-cache gate below — which is gitignored, so they ran on one
+# machine and nowhere else. Read from the installed package they need no data at
+# all, which is what makes them run on a fresh clone.
+
+message("\n# fly's own values, read from the installed package\n")
+
+# NOT wrapped in a handler that downgrades a miss to a skip. A fly that renames
+# this internal is exactly the fly whose threshold may have moved, so masking the
+# rename disarms the pin on the one event it exists for.
+ok("aoi_dem_coverage_min() matches fly's",
+   identical(aoi_dem_coverage_min(), fly:::fly_dem_coverage_min()))
+
+# The vocabulary, read out of fly_footprint()'s own source rather than re-typed.
+# `dem_agl` and `no_dem_coverage` are emitted only under a DEM, so while
+# aoi_dem_enabled() is FALSE no run and no fixture can reach them — this is the
+# only check that does, and it is the one that matters the day #23 flips it.
+fp_src <- paste(deparse(fly::fly_footprint), collapse = "\n")
+for (v in aoi_terrain_values()) {
+  ok(paste0("fly_footprint() still emits '", v, "'"),
+     grepl(paste0('"', v, '"'), fp_src, fixed = TRUE))
+}
+
 cache <- "data/centroids/se_c.parquet"
 if (file.exists(cache)) {
   real <- aoi_centroids_as_sf(arrow::read_parquet(cache))
@@ -177,21 +202,18 @@ if (file.exists(cache)) {
      length(setdiff(stats::na.omit(unique(fp_real$footprint_terrain)),
                     aoi_terrain_values())) == 0)
 
-  # And fly's coverage threshold, which aoi.R has to copy because fly does not
-  # export it. `:::` is acceptable in a test — it is what makes the copy pinned
-  # rather than merely stamped.
-  thr <- tryCatch(fly:::fly_dem_coverage_min(), error = function(e) NULL)
-  if (is.null(thr)) {
-    message(sprintf("%-58s %s", "fly's coverage threshold",
-                    "SKIPPED - fly:::fly_dem_coverage_min() not found"))
-  } else {
-    ok("aoi_dem_coverage_min() matches fly's",
-       identical(aoi_dem_coverage_min(), thr))
-  }
 } else {
-  message(sprintf("%-58s %s",
-                  "fly_footprint() on real bcdata input",
-                  "SKIPPED - no centroid cache; run 01_fetch.R se_c"))
+  # Name every assertion the gate withholds, not just the first, and COUNT them —
+  # a fresh clone used to lose five of these and still print "All assertions
+  # passed." An arm that did not run is a third state beside pass and fail.
+  for (lab in c("the real bcdata-shaped input is tibble-backed",
+                "fly_footprint() returns every declared column on it",
+                "aoi_footprint_cols() is fly's reporting set exactly",
+                "every footprint_terrain fly emits is in aoi_terrain_values()")) {
+    skipped <<- skipped + 1L
+    message(sprintf("%-58s %s", lab,
+                    "SKIPPED - no centroid cache; run 01_fetch.R se_c"))
+  }
 }
 
 # --- aoi_ledger_cols() ----------------------------------------------------
@@ -280,12 +302,31 @@ message("\n# aoi_require_fly() is called by every fly caller\n")
 # the fix either: `sub("#.*", "", line)` truncates a `#` inside a string literal,
 # and 01_fetch.R has one. `parse()` drops comments by construction and proves the
 # file parses while it is at it.
-code_of <- function(f) paste(deparse(parse(f)), collapse = "\n")
+# Ask the parse tree for a CALL, not the file for text. Four spellings of one
+# defect were closed one at a time: total removal (round 2), a whole-line comment
+# (round 3), a trailing comment (round 4), and a mention inside a STRING LITERAL
+# (round 5) — `message("... guarded by aoi_require_fly() ...")` passed a
+# `deparse(parse(f))` scan, and `scripts/aoi.R:59` is a live example of that
+# shape. `all.names()` walks the tree and returns symbols; a string constant is
+# not a symbol, so no spelling of a mention can survive it.
+#
+# Wrapped, because a file that does not parse must be a finding rather than an
+# abort: uncaught, one syntax error in any stage script killed the suite mid-run
+# and the summary never printed.
+guarded <- function(f) {
+  tryCatch(
+    any(unlist(lapply(parse(f), all.names)) == "aoi_require_fly"),
+    error = function(e) {
+      message("      ", basename(f), " does not parse: ", conditionMessage(e))
+      FALSE
+    }
+  )
+}
 
 for (f in c("scripts/00_review_samples.R", "scripts/01_fetch.R",
             "scripts/02_georef.R", "scripts/test_pipeline.R")) {
   ok(paste0(basename(f), " calls aoi_require_fly()"),
-     grepl("aoi_require_fly()", code_of(f), fixed = TRUE))
+     guarded(f))
 }
 
 # The complement: any script calling fly must be in the list above. Catches a
@@ -310,8 +351,7 @@ ok("found the fly callers at all", length(fly_callers) >= 4)
 # that mention.
 fly_callers <- setdiff(fly_callers, "scripts/aoi.R")
 
-unguarded <- Filter(function(f) !grepl("aoi_require_fly()", code_of(f),
-                                       fixed = TRUE), fly_callers)
+unguarded <- Filter(function(f) !guarded(f), fly_callers)
 
 ok("no unguarded fly caller in scripts/", length(unguarded) == 0)
 if (length(unguarded)) {
@@ -419,6 +459,10 @@ ok("  ... lists the vocabulary it knows",
 # function over. The DEM values matter most: `aoi_dem_enabled()` is FALSE, so
 # `dem_agl` and `no_dem_coverage` appear in no run and no other test, and the day
 # #23 flips it a wrong set aborts 01_fetch.R on every AOI.
+# Re-typed so a widening or narrowing of aoi_terrain_values() goes red. This is
+# a change-detector, NOT a validation: it is a second copy of a fly fact, and a
+# duplicate of a guess cannot check the guess. What validates the vocabulary is
+# the fly-side pin above, which reads each value out of fly_footprint()'s source.
 expected_terrain <- c("nominal_scale", "gsd_scaled", "dem_agl", "no_dem_coverage")
 ok("terrain vocabulary matches the declared contract",
    setequal(aoi_terrain_values(), expected_terrain))
@@ -455,7 +499,11 @@ ok("stays in [0, 360)", all(aoi_rotation(seq(0, 359, by = 7)) %in% seq(0, 270, 9
 # --- Result ---------------------------------------------------------------
 
 message("")
+if (skipped > 0L) {
+  message(skipped, " assertion(s) SKIPPED - see above. They are not passes.")
+}
 if (failures > 0L) {
   stop(failures, " assertion(s) failed", call. = FALSE)
 }
-message("All assertions passed.")
+message("All assertions passed",
+        if (skipped > 0L) paste0(" (", skipped, " skipped).") else ".")

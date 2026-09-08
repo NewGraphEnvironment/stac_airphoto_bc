@@ -100,6 +100,19 @@ aoi_footprint_cols <- function() {
     "footprint_bearing", "height_agl", "dem_coverage")
 }
 
+#' fly's DEM coverage warning threshold
+#'
+#' A fact about fly, not a contract this repo chose. `fly_dem_coverage_min()` is
+#' internal and not exported, so it is copied here rather than called — and
+#' **pinned** against fly in `tests/test_aoi.R`, which may reach through `fly:::`
+#' where production code should not. A copy with a pin is a stamped literal; a
+#' copy without one goes stale invisibly.
+#'
+#' **Source:** `fly/R/fly_footprint.R:176`, `fly_dem_coverage_min() <- 0.95`,
+#' read 2026-09-07 against fly 0.10.0. Used only in report prose; nothing
+#' branches on it.
+aoi_dem_coverage_min <- function() 0.95
+
 #' Terrain routes fly is known to emit
 #'
 #' A positive control on fly's vocabulary. `aoi_rotation_ok()` and the report
@@ -107,18 +120,12 @@ aoi_footprint_cols <- function() {
 #' fails toward *pass* — silently, on the arm that matters. Refusing an
 #' unrecognised value turns that into an abort naming the value, so a new fly
 #' sizing route is a loud stop rather than a quiet mis-classification.
-#' fly's DEM coverage warning threshold
 #'
-#' A fact about fly, not a contract this repo chose, so it would ideally be read
-#' from fly rather than typed here — but `fly_dem_coverage_min()` is internal and
-#' not exported, and reaching through `fly:::` to a private function is a worse
-#' dependency than a stamped literal. So: stamped.
-#'
-#' **Source:** `fly/R/fly_footprint.R:176`, `fly_dem_coverage_min() <- 0.95`,
-#' read 2026-09-07 against fly 0.10.0. Used only in report prose; nothing
-#' branches on it.
-aoi_dem_coverage_min <- function() 0.95
-
+#' Like the threshold above this is fly's fact, not ours, and it is pinned in
+#' `tests/test_aoi.R` against `fly_footprint()`'s own source. `dem_agl` and
+#' `no_dem_coverage` are emitted only under a DEM, so no run and no fixture can
+#' corroborate them while `aoi_dem_enabled()` is FALSE — reading them out of fly
+#' is the only check that reaches them before #23 flips it.
 aoi_terrain_values <- function() {
   c("nominal_scale", "gsd_scaled", "dem_agl", "no_dem_coverage")
 }
