@@ -14,6 +14,8 @@ library(fly)
 
 source("scripts/aoi.R")
 
+aoi_require_fly()
+
 n_test <- 100
 seed <- 42
 
@@ -73,7 +75,8 @@ georef_results <- purrr::map_dfr(years, function(yr) {
   fly::fly_georef(
     fr, ph,
     dest_dir = file.path("data", "raw", "georef", "thumbs", yr),
-    rotation = "auto"
+    rotation = "auto",
+    dem = aoi_dem(id)
   )
 })
 message("Georeffed: ", sum(georef_results$success), "/", nrow(georef_results))

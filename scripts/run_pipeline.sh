@@ -5,8 +5,13 @@
 #   bash scripts/run_pipeline.sh                 # every registered AOI
 #   bash scripts/run_pipeline.sh se_a se_b       # named AOIs only
 #
-# Requires: R with fly (>= 0.5.0)/terra/arrow, conda env stac-airphoto-bc,
-# AWS credentials with write access to s3://stac-airphoto-bc.
+# Requires: R with fly/terra/arrow/flooded, conda env stac-airphoto-bc, AWS
+# credentials with write access to s3://stac-airphoto-bc.
+#
+# No fly version is named here on purpose. 01_fetch.R and 02_georef.R call
+# aoi_require_fly(), which asserts the capability the pipeline needs — that
+# `dem` reaches fly_filter(), fly_footprint() and fly_georef() — rather than a
+# number that goes stale every time fly releases. See scripts/aoi.R.
 #
 # Registration runs BEFORE the S3 sync. It used to run after, which meant the
 # item JSONs and collection.json a run produced were never uploaded by that run
