@@ -59,7 +59,7 @@ To add an area, add an entry to `aoi_registry()`. Nothing else changes.
 | 4 | `04_s3_upload.R` | Sync COGs to the S3 bucket, uploading only new or changed files |
 | 5 | `05_stac_register.py` | Create a STAC catalog record for each image (location, date, properties, download link) and validate the whole collection |
 | — | `airphoto_props.py` | Turns a catalogue row into `airphoto:` item properties and `metadata`-role assets. Imported by both step 5 and the backfill so the two cannot disagree; not run directly |
-| — | `../tests/` | Unit tests for `airphoto_props.py` — the two coercions that fail silently (`Y`/`N` to boolean, and the `0` sentinel). Run with `conda run -n stac-airphoto-bc pytest tests/ -q` from the repo root |
+| — | `../tests/` | Unit tests. `test_airphoto_props.py` covers the two coercions that fail silently (`Y`/`N` to boolean, and the `0` sentinel) — `conda run -n stac-airphoto-bc pytest tests/ -q`. `test_aoi.R` covers the guards in `aoi.R` that must fail toward abort — `Rscript tests/test_aoi.R`. Both from the repo root |
 | — | `test_pipeline.R` | Run a 100-photo sample through the full pipeline to verify everything works after code changes |
 
 ## Backfilling items published before a metadata change
@@ -161,21 +161,52 @@ and B.
 `data/select/<id>.csv` carries one row per frame in the buffered fetch window,
 each with exactly one outcome, and the counts must reconcile to the window —
 that is what makes "what selection rejected and why" answerable rather than
-asserted. Reasons: `selected`, `digital_unknown_format`, `footprint_misses_aoi`,
-`no_thumbnail_url`, `fetch_failed`, `georef_failed`.
+asserted. Reasons: `selected`, `no_footprint`, `footprint_misses_aoi`,
+`no_thumbnail_url`, `fetch_failed`, `georef_failed`. The declared column set is
+`aoi_ledger_cols()`, and `aoi_ledger_write()` refuses a ledger missing any of
+them — including one written before #20, which carries no terrain columns.
 
-`digital_unknown_format` is the interesting one. `fly` (>= 0.4.0) will not size
-a footprint for a digital frame, because a sensor's width is not in the centroid
-metadata (fly#32). The share varies far more than expected: 2.2% of the AOI A
-window, 4% of B, **20% of C**. Those are the frames the published Neexdzii Kwa
-collection sized as 9-inch negatives — one of them ships an 11,435 m footprint
-against 2,286–7,242 m for every film frame. Excluding them stops shipping that.
+`no_footprint` replaced `digital_unknown_format` in #20, and the rename is not
+cosmetic. The old reason keyed on `footprint_basis == "unknown_format"`, a
+string fly stopped writing for these frames once fly 0.6.0 could size digital
+ones — after which an unsized frame fell through to `footprint_misses_aoi` and
+was reported as *sized, but missing the AOI* for a frame that was never sized at
+all. It now keys on `footprint_terrain` being absent, which is the property
+itself.
+
+Digital frames are no longer excluded. fly 0.6.0 sizes them from `pixel count x
+ground_sample_distance`, and on `se_c` at fly 0.10.0 that is **188 of 1,013**
+frames which fly 0.5.0 refused, leaving 15 genuinely unsizeable. Those 15 all
+gain footprints when terrain correction is switched on — see
+`aoi_dem_enabled()`.
+
+`footprint_terrain`, `width_source`, `footprint_bearing`, `height_agl` and
+`dem_coverage` are `fly`'s own reporting columns and land in the ledger
+unchanged — all six of them, which is what `aoi_footprint_cols()` declares. With
+the DEM off the last two are empty on every row, which the report says rather
+than showing a blank table.
+
+`georef_failed` is currently the outcome for most film frames, and that is
+deliberate rather than a fault. fly 0.9.0 refuses a rotated film frame without
+its roll's measured rotation, `aoi_rotation_ok()` no longer supplies one that
+would suppress that refusal, and issue #23 carries the table. Measured cold on
+`se_c`: 11 of 88 georeference — the digital frames plus one unrotated film
+frame. Note `fly_georef(overwrite = FALSE)` skips GeoTIFFs already on disk, so
+re-running over a populated tree reports success for frames it did not write.
+
+**The committed reports under `data/reports/` still use the old vocabulary, and
+that is deliberate.** They are the only tracked artifact under `data/`, and they
+describe the collection as *published* — a fly 0.5.0 selection. Regenerating them
+here would have them describe a selection nobody published, so they are
+regenerated when #23 rebuilds and republishes. Until then, expect
+`digital_unknown_format` in the committed reports and `no_footprint` from the
+code.
 
 ## Prerequisites
 
 | Component | What's needed |
 |-----------|---------------|
-| R packages | `fly` (≥ 0.5.0), `fresh`, `terra`, `sf`, `dplyr`, `arrow`, `purrr` |
+| R packages | `fly`, `fresh`, `flooded`, `terra`, `sf`, `dplyr`, `arrow`, `purrr`. No fly version is pinned — `aoi_require_fly()` asserts that `dem` reaches `fly_filter()`, `fly_footprint()` and `fly_georef()`, which is the capability the pipeline depends on. Take the latest fly. |
 | Python (conda) | Environment `stac-airphoto-bc` with `pystac`, `rasterio`, `shapely`, `pyarrow` |
 | geopro | `GEOPRO_IP` set in the environment for the registration step |
 | AWS CLI | Configured with write access to `s3://stac-airphoto-bc` |

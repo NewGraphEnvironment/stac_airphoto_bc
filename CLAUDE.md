@@ -21,7 +21,10 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 
 ## Architecture
 
-Built on [fly](https://github.com/NewGraphEnvironment/fly) (>= 0.5.0).
+Built on [fly](https://github.com/NewGraphEnvironment/fly). No version is pinned:
+`aoi_require_fly()` (`scripts/aoi.R`) asserts the capability instead — that `dem`
+reaches `fly_filter()`, `fly_footprint()` and `fly_georef()`. Developed against
+fly 0.10.0.
 
 ### fly package provides
 
@@ -158,17 +161,52 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
   URLs a ranged `GET` serves 206 for, including flight logs `fly::fly_fetch()`
   downloads successfully. A HEAD-based check would report every metadata asset
   in the collection dead.
-- **Digital frames are excluded.** `fly` (>= 0.4.0) will not size a footprint
-  without a sensor width (fly#32). The Neexdzii Kwa items predate that and were
-  sized as 9-inch negatives — `bcd12008` ships an 11,435 m footprint against
-  2,286–7,242 m for film. Those wrong items are still published; the southeast
-  AOIs simply stopped adding more.
-- **`fly_footprint()` drops `footprint_basis` on tibble input** (fly#35), which
-  is what `bcdata` returns. `aoi_centroids_as_sf()` coerces around it — remove
-  that once fly#35 lands.
-- No DEM-corrected footprints yet. fly 0.5.0's `dem` argument would grow
-  footprint area by a median 14%; applying it to one region only would leave the
-  collection half-corrected, so it waits for a rebuild of both.
+- **`fly_footprint()` reports six columns, not four.** `footprint_basis`,
+  `footprint_terrain`, `width_source`, `footprint_bearing`, `height_agl` and
+  `dem_coverage`, all carried to the ledger since #20. `width_source` arrived in
+  fly 0.6.0 and `footprint_bearing` in 0.9.0, and a set written against an older
+  fly is a guard that cannot see the newer columns going missing —
+  `aoi_footprint_cols()` is the one place to widen when fly adds another.
+- **Digital frames now size, and no longer match what is published.** fly 0.6.0
+  sizes them from `pixel count x ground_sample_distance` (fly#32), so the
+  exclusion this section used to record is over: re-measured on `se_c` at fly
+  0.10.0, **188 of 1,013** frames gain a footprint that fly 0.5.0 refused, and
+  15 are still unsized. The published Neexdzii Kwa items predate all of it and
+  were sized as 9-inch negatives — `bcd12008` ships an 11,435 m footprint
+  against 2,286–7,242 m for film. Those wrong items are still published; #23
+  rebuilds them.
+- **Upgrading fly moves film selection too, which the #20 issue body did not
+  anticipate.** fly 0.9.0 rotates every footprint onto its flight line, and a
+  square rotated 45° overlaps its axis-aligned self by only 83%. Measured on
+  `se_c`: 12 film frames changed rejection outcome across the 0.5.0 → 0.10.0
+  upgrade, 6 each way, every one of them on a diagonal bearing. So "film output
+  is unchanged" held only through fly 0.8.x.
+- **Film frames are refused by `fly_georef()` until #23 lands the per-roll
+  rotation table, and that is deliberate.** fly 0.9.0 rotates every film
+  footprint onto its flight line and then refuses such a frame unless given that
+  roll's rotation, because the corner mapping is a per-roll camera-mount property
+  it cannot derive. A user `rotation` column is the highest-precedence input
+  (`fly/R/fly_georef.R:316`, refusal at `:322`) and **disarms that refusal** — measured
+  on 11 real 1995 frames, 11/11 written with the column against 0/11 and 11
+  refusal warnings without it. `aoi_rotation()` derives the value per frame from
+  bearing, so it varies *within* a roll where the property is a per-roll
+  constant: **34 of 48 rolls** on `se_c` get two to four different values, so at
+  most one per roll can be right, and the wrong ones produce a valid GeoTIFF over
+  the right ground with the picture turned and `success = TRUE`.
+  `aoi_rotation_ok()` therefore supplies a rotation only where fly has *not*
+  rotated the ring — `is.na(footprint_bearing)`, fly's own routing condition —
+  and only for film. Measured cold on `se_c`: **11 of 88** georeferenced, the 10
+  digital 2018 frames plus one unrotated film frame; the other 77 land as
+  `georef_failed`. Loud and visible beats 807 frames written possibly turned.
+  **Check the cold path when measuring this** — `fly_georef(overwrite = FALSE)`
+  skips existing GeoTIFFs, so a re-run over a populated tree reports 88/88.
+- **DEM-corrected footprints are wired and off.** `aoi_dem_enabled()` returns
+  `FALSE`; flipping it threads MRDEM-30 through `flooded::fl_dem_aoi()` into the
+  one `fly_footprint()` call that selection reads. Applying it to one region
+  only would leave the collection half-corrected, so it waits for #23 to rebuild
+  both. Measured on `se_c` with it on: selection 88 → 104, `dem_coverage` min
+  0.975 and median 1.0 with none below fly's 0.95 threshold, and the 15
+  otherwise-unsizeable frames all gain footprints.
 - `stac_register-pypgstac.sh` on geopro **deletes and reloads** from
   `collection.json`, so that file is load-bearing. It also aborts after the
   delete if any item fetch fails, which leaves the collection briefly empty.

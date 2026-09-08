@@ -20,6 +20,8 @@ suppressPackageStartupMessages({
 
 source("scripts/aoi.R")
 
+aoi_require_fly()
+
 N_PER_YEAR <- 2
 SEED <- 42
 
@@ -36,8 +38,12 @@ for (id in ids) {
 
   aoi <- aoi_resolve(id)
 
+  # Same DEM as 01_fetch.R, or this samples a different set than the pipeline
+  # selects — which is the whole point of the stage. Read-only: 01_fetch.R builds
+  # the cache, and with terrain correction off this is NULL and changes nothing.
   centroids <- aoi_centroids_as_sf(arrow::read_parquet(cache)) |>
-    (\(x) fly::fly_filter(x, aoi, method = "footprint"))() |>
+    (\(x) fly::fly_filter(x, aoi, method = "footprint",
+                          dem = aoi_dem(id)))() |>
     dplyr::mutate(year = as.integer(photo_year)) |>
     dplyr::filter(!is.na(thumbnail_image_url))
 

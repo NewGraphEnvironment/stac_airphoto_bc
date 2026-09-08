@@ -16,6 +16,8 @@ suppressPackageStartupMessages({
 
 source("scripts/aoi.R")
 
+aoi_require_fly()
+
 ids <- aoi_ids()
 
 for (id in ids) {
@@ -38,6 +40,19 @@ for (id in ids) {
     stop("Selected set for '", id, "' has no `rotation` column — ",
          "re-run 01_fetch.R.", call. = FALSE)
   }
+
+  # --- The ledger, read and checked before any work -----------------------
+  # Up here rather than beside the write at the end of the loop: the schema
+  # refusal tells the operator to re-run 01_fetch.R, and it used to arrive after
+  # fly_georef() had already written every GeoTIFF for the AOI.
+
+  ledger <- readr::read_csv(aoi_path("ledger", id), show_col_types = FALSE)
+  aoi_ledger_check_cols(ledger, id)
+
+  # Built at fetch time, read here. Resolving the AOI polygon to build one would
+  # open a `fresh` database connection for a watershed AOI, which this stage has
+  # no other reason to need.
+  dem <- aoi_dem(id)
 
   # --- What actually made it to disk --------------------------------------
 
@@ -75,15 +90,14 @@ for (id in ids) {
     fly::fly_georef(
       fr, ph,
       dest_dir = file.path("data", "raw", "georef", "thumbs", yr),
-      rotation = "auto"
+      rotation = "auto",
+      dem = dem
     )
   })
 
   readr::write_csv(georef_results, aoi_path("georef_log", id))
 
   # --- Fold failures back into the ledger ---------------------------------
-
-  ledger <- readr::read_csv(aoi_path("ledger", id), show_col_types = FALSE)
 
   # Recompute the outcome for every frame this run covered, rather than only
   # marking failures. fly_georef() reports success for an output that already

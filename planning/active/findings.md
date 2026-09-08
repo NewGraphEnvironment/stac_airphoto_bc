@@ -63,36 +63,52 @@ must clear the **corner** of the widest footprint — `half_side * sqrt(2)`, not
 so `3621 * sqrt(2)` = **5,121 m** past the fetch window. Allow extra, because the
 correction enlarges footprints before the second sampling pass.
 
-## Why the guard is a window, not the floor the issue names
+## Why the guard names no version at all
 
-The issue prescribes `>= 0.6.0`. A bare floor passes on 0.10.0, which is what sits in
-the sibling working tree. At **≥ 0.9** this pipeline degrades two ways:
+**Superseded, and kept because the reasoning moved twice.** The issue prescribes a
+floor of `>= 0.6.0`. A version *window* `[0.6.0, 0.9.0)` was designed and then
+dropped; what shipped is a capability assert with no version comparison in it.
 
-- `fly_bearing()` returns `NA_real_` for a frame with no *adjacent* neighbour by
-  `frame_number` (`fly/R/fly_bearing.R:105`, NEWS 0.9.0: "breaking for sampled input").
-  The 8 km window is a spatial subset of every roll, so gaps are routine —
-  `aoi_rotation()` then falls back to the fixed 180° that fly#25/#26 exist to correct.
-  No error, no warning. This is the silent one.
-- `fly_georef()` refuses a rotated film frame without the roll's measured `rotation`
-  (NEWS 0.9.0), and that table is #23's deliverable.
+The floor is stale: #20 was filed **2026-08-30**, the day fly 0.6.0 and 0.7.0 shipped,
+and never edited. 0.7.1, 0.8.0 (09-01), 0.9.0 (09-02) and 0.10.0 (09-07) landed after
+it, and #23 — filed 09-06 — wants fly 0.9 at a pinned SHA.
 
-0.9.0 also changed the **meaning** of the `rotation` column: it used to shift corners on
-an axis-aligned square and now shifts them on a ring already rotated onto the bearing.
-`aoi_rotation()`'s output is calibrated against the old meaning.
+The window was dropped for two reasons:
 
-## What upgrading to 0.6.0–0.8.x changes on its own
+1. It would have pinned this repo to **0.8.0**, superseded on 09-02, which #23 lifts
+   within its own scope.
+2. Its main justification was overstated. `fly_georef()` returns `success = FALSE` for
+   a rotated film frame with no per-roll rotation (`fly/R/fly_georef.R:284`), and
+   `02_georef.R:94-96` folds that into the ledger as `georef_failed`. fly refuses
+   loudly by itself, so a ceiling here is a second copy of that refusal — and the copy
+   that goes stale. `CLAUDE.md`, "Assert capabilities, not versions".
 
-Not nothing, and this must not be mistaken for a regression when the ledger is diffed.
+What survives from that analysis, and is now **measured** rather than reasoned:
 
-- **0.6.0 sizes digital frames** (fly#32) from `pixel count × ground_sample_distance`,
-  so frames currently rejected `digital_unknown_format` gain footprints and become
-  selectable. se_c has the highest digital share of the three southeast AOIs (20%).
+- At fly ≥ 0.9, `fly_bearing()` returns `NA_real_` for a frame with no *adjacent*
+  neighbour by `frame_number` (`fly/R/fly_bearing.R:105`). The 8 km window is a spatial
+  subset of every roll, so gaps are routine and those frames fall to `aoi_rotation()`'s
+  fixed 180°. Measured on `se_c`: 3 of 810 film frames have no bearing.
+- 0.9.0 changed the **meaning** of the `rotation` column — it used to shift corners on
+  an axis-aligned square and now shifts them on a ring already rotated onto the
+  bearing. `aoi_rotation()` is calibrated against the old meaning, so film
+  georeferencing is not settled by this issue. #23 owns it and has the per-roll table.
+
+## What upgrading fly changes on its own
+
+Not nothing, and it must not be mistaken for a regression when the ledger is diffed.
+Measured end to end below.
+
+- **0.6.0 sizes digital frames** (fly#32) from `pixel count x ground_sample_distance`,
+  so frames previously rejected as unsizeable gain footprints and become selectable.
 - 0.6.0 also records that the catalogue's `SCALE` gives **34% of true width** on a
   digital frame, measured on 40 UltraCam Eagle frames — which is why digital is sized
-  from GSD rather than scale.
+  from GSD rather than from scale.
 - **0.8.0 refuses non-POINT geometry everywhere** (fly#37). `aoi_centroids_as_sf()`
-  produces POINT, so this is a no-op here.
-- Film output is unchanged through 0.8.x; 0.9.0 is where film footprints start rotating.
+  builds POINT, so this is a no-op here — and it is now the *reason* that function
+  keeps its `st_as_sf(coords = )` step, not merely a convenience.
+- **0.9.0 rotates film footprints too**, so film selection moves. The issue body's
+  premise that 0.6.0 leaves film unchanged held only through 0.8.x.
 
 ## Local state, 2026-09-07
 
@@ -105,8 +121,172 @@ both regions is #23's campaign and not this issue's.
 they describe the **published** collection. A verification run rewrites them to describe
 a selection nobody published.
 
+## Verification measurements, fly 0.10.0, `se_c` (1,013 frames)
+
+### `fly_footprint()` row alignment — the riskiest assumption in the change
+
+`01_fetch.R` assigns four columns onto `window` **by position** and derives
+`cand_ids` from the same object. If `fly_footprint()` reordered or dropped rows,
+every column would misalign silently and the candidate set would name the wrong
+frames. Measured rather than read:
+
+```
+nrow in : 1013      nrow out: 1013
+airp_id IDENTICAL and in order: TRUE
+film_roll aligned: TRUE     frame_number aligned: TRUE
+```
+
+### Replacing `fly_filter()` with one `st_intersects()` is set-identical
+
+`fly_filter()` builds its own footprints (`fly/R/fly_filter.R:50`), so using it
+would leave two derivations of one fact — the defect #20 exists to remove. The
+replacement was proven equivalent, not assumed:
+
+```
+st_intersects n: 91      fly_filter n: 91
+SAME SET: TRUE           symmetric difference: 0
+```
+
+91 candidates minus the 3 frames with no thumbnail URL is the 88 the ledger
+marks `selected`.
+
+### DEM off vs on — the deterministic check
+
+"The selected set must differ" was the plan's original assertion and it is a bad
+one: fly 0.6.0's digital sizing moves the set too, so it passes for the wrong
+reason, and a small AOI with no frame near the boundary could leave it unmoved
+with the plumbing correct. Replaced with a signal only a DEM can produce.
+
+| | DEM off (delivered) | DEM on |
+|---|---|---|
+| `footprint_terrain` values | `nominal_scale`, `gsd_scaled` | `dem_agl`, `gsd_scaled` |
+| rows with `height_agl` | 0 | 825 |
+| `selected` | 88 | 104 |
+| unsized (`no_footprint`) | 15 | 0 |
+
+`dem_coverage`: n = 825, min **0.9754**, median **1.0**, **0** frames below
+fly's 0.95 threshold — so the 6 km corner allowance on top of the 8 km fetch
+buffer is measured adequate rather than reasoned adequate. `height_agl` ranges
+732–10,253 m.
+
+The 15 frames fly cannot size from GSD all gain footprints under a DEM, which is
+what fly's own warning predicts: *"a digital frame needs either a
+`ground_sample_distance` and a calibrated pixel count, or `dem` together with
+`flying_height` and `focal_length`"*.
+
+### Upgrading fly 0.5.0 → 0.10.0 moves selection on its own
+
+Reconciled against the fly 0.5.0 ledger preserved before the upgrade. 215 of
+1,013 rows changed outcome, and every one is accounted for:
+
+| | old | new |
+|---|---|---|
+| `digital_unknown_format` / `no_footprint` | 203 | 15 |
+| `footprint_misses_aoi` | 729 | 907 |
+| `selected` | 78 | 88 |
+| `no_thumbnail_url` | 3 | 3 |
+
+- **203 digital frames** move: 188 gain a footprint (178 then miss the AOI, 10
+  are selected) and 15 remain unsized. fly 0.6.0, fly#32.
+- **12 film frames** move, 6 each way. This is the part the #20 issue body did
+  not anticipate — it says 0.6.0 leaves film output unchanged, which held only
+  through 0.8.x. fly 0.9.0 rotates every footprint onto its flight line, and all
+  12 movers are on diagonal bearings (46°, 48°, 84°, 115°, 145°, 169°, 226°,
+  242°, 260°, 263°, 264°, 264°) — exactly where a rotated square overlaps its
+  axis-aligned self by only 83%.
+
+### The rotation mask works
+
+`rotation` is non-`NA` on all 810 film frames and `NA` on all 203 digital ones,
+so `fly_georef()` now reaches `fly_digital_rotation()` for digital frames instead
+of being overridden by a film-derived 180.
+
+`02_georef.R se_c` then georeferenced **88/88**, including the 10 digital 2018
+frames that fly 0.5.0 could not size at all.
+
 ## Errors Encountered
 
 | Error | Resolution |
 |-------|------------|
 | Proposed `bcmaps::cded_terra()` as the DEM source without searching the org for the verb | `flooded::fl_dem_aoi()` already exists — MRDEM-30 default, crop before reproject, returns a SpatRaster. User caught it. `karpathy.md` §7, "Not finding it is not evidence it does not exist". |
+| Designed a fly version *window* `[0.6.0, 0.9.0)`, which would have pinned the repo to a release superseded five days earlier | The user asked whether the issue was out of date. It was — filed the day 0.6.0 shipped, five releases back. Replaced with a capability assert carrying no version at all. |
+| `git checkout -- scripts/02_georef.R` to undo a test mutation silently restored the **staged** copy, discarding the DEM thread and the hoisted ledger check | `git checkout <path>` reinstates from the index, not `HEAD`. Re-applied by script. Back up to the scratchpad before mutating, and prefer restoring from that copy. |
+| A first version of the ledger schema test built its fixture from `aoi_ledger_cols()` — the function under test — so the assertion was `setdiff(x, x)` and appending a bogus column left the suite green | The schema is a contract this repo chose, so the expectation is hardcoded independently. Proven by mutation: the bogus column now reddens two assertions. |
+
+## Round 3: the rotation column was disarming fly's own refusal
+
+The most expensive finding of the issue, and it inverted a result reported
+earlier in this session as a success.
+
+`02_georef.R se_c` was reported as **88/88 georeferenced**, including film. That
+was two errors stacked:
+
+1. **The run was the warm path.** `fly_georef(overwrite = FALSE)` skips a GeoTIFF
+   already on disk, and the tree was populated from an earlier run. Cleared and
+   re-run cold, the same command gives **11 of 88**.
+2. **The 88 were only written because this pipeline disarmed fly's safety
+   refusal.** fly 0.9.0 rotates every film footprint onto its flight line and
+   then refuses such a frame unless the caller supplies that roll's rotation,
+   because the corner mapping is a per-roll camera-mount property it cannot
+   derive. A user `rotation` column is the highest-precedence input
+   (`fly/R/fly_georef.R:316, :321, :345`) and short-circuits the refusal.
+
+Measured on 11 real 1995 film frames:
+
+| | written | warnings |
+|---|---|---|
+| with the `rotation` column | 11/11 | 0 |
+| with `rotation` set to `NA` | **0/11** | 11 film refusals |
+
+And the supplied value is wrong by construction. `aoi_rotation()` derives it per
+frame from bearing; the property is a per-roll constant. On `se_c`, **34 of 48
+rolls** receive two to four different values:
+
+```
+bcb94081  43 frames  4 distinct rotations
+bcc95037  80 frames  3
+bc80140   60 frames  3
+bcc98035  39 frames  3
+```
+
+At most one value per roll can be right. The failure direction is the expensive
+one — a valid GeoTIFF, correct CRS, correct ground, picture turned a quarter or
+half turn, `success = TRUE`, `selected` in the ledger, nothing reporting it.
+
+**This also invalidated the reasoning for dropping the fly version ceiling.** The
+argument put to the user was that a ceiling duplicates a refusal *fly already
+makes loudly*. fly does make it — and this pipeline was suppressing it, so the
+ceiling was protecting something real. Put back to the user with the measurement;
+they chose to stay on fly 0.10.0 and let fly refuse.
+
+### Delivered behaviour
+
+`aoi_rotation_ok()` supplies a rotation only where fly has **not** rotated the
+ring (`is.na(footprint_bearing)` — fly's own routing condition) and only for
+film. Measured cold on `se_c`:
+
+| | n |
+|---|---|
+| `rotation` supplied | **3** (film, unrotated ring) |
+| withheld — rotated film | 807 |
+| withheld — digital | 203 |
+| georeferenced | **11 of 88** (10 digital 2018 + 1 film) |
+| `georef_failed` | 77, every one film, zero digital |
+
+Ledger partitions 907 + 77 + 15 + 3 + 11 = 1,013.
+
+## Round 3: fly reports six columns, not four
+
+`aoi_footprint_cols()` was written against fly 0.5.1 and named four. fly 0.10.0
+returns **six** — `width_source` (0.6.0) and `footprint_bearing` (0.9.0) were
+being dropped by the very transmute #20 exists to fix. The guard could not see
+it, because its expected set is the same literal the code assigns from. Both are
+now carried; the ledger is 15 columns.
+
+## Errors Encountered (round 3)
+
+| Error | Resolution |
+|-------|------------|
+| Reported "88/88 georeferenced" as a success. It was the warm path over a populated tree, and the frames only wrote because fly's refusal was disarmed | Clear the outputs and measure the cold path. `code-check.md`, "Test the cold/create path of idempotent code, not just the warm no-op". |
+| Told the user a version ceiling was unnecessary because "fly already refuses loudly by itself" | Measurably false — the refusal was suppressed by the `rotation` column this pipeline supplies. Re-put to the user with the measurement. |
+| Three test assertions passed on text that was a comment or an input reference rather than a declaration | Strip comments before scanning, cut the transmute at `rejected_reason =`, and prove each with the mutation that defeated the original. |
