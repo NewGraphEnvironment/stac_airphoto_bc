@@ -16,10 +16,10 @@ publish and geopro reload are a separate step after merge.**
 - [x] Branch `23-rebuild-the-collection-on-current-fly`, PWF baseline, plan review (Plan agent, concurrent)
 
 ## Phase 1: The tables, committed and reproducible
-- [ ] `data-raw/georef_validate_import.R`: reads `stac_orthophoto_bc/data/georef_validate/{rotation_table,placement_frame}.csv` and writes reduced copies. Refuses a dirty source tree, and records the source commit
-- [ ] `data-raw/rotation_roll.csv`: `film_roll, rotation, rotation_source` (`measured` = correlator `decided`/`majority`; `reviewed` = `decided_confirmed`/`decided_by_eye`; the 2 unresolved rolls are left out so they fall to the series rule)
-- [ ] `data-raw/placement_frame.csv`: `airp_id, placement_source, shift_x_m_3005, shift_y_m_3005`. Every row, with `none` kept, so absent means outside the table
-- [ ] Guards in the import: 67 rolls, 10,239 frames, counts by source 252/211/9,776, rotations limited to {0, 90, 180, 270}, `bc81050`/`bcc668` carry no shift
+- [x] `data-raw/tables_import-georef_validate.R` (renamed noun-first): reads `stac_orthophoto_bc/data/georef_validate/{rotation_table,placement_frame}.csv` and writes reduced copies. Refuses a dirty source tree, and records the source commit
+- [x] `data-raw/rotation_roll.csv`: `film_roll, rotation, rotation_source` (`measured` = correlator `decided`/`majority`; `reviewed` = `decided_confirmed`/`decided_by_eye`; the 2 unresolved rolls are left out so they fall to the series rule)
+- [x] `data-raw/placement_frame.csv`: `airp_id, placement_source, shift_x_m_3005, shift_y_m_3005`. Every row, with `none` kept, so absent means outside the table
+- [x] Guards in the import: 67 rolls, 10,239 frames, counts by source 252/211/9,776, rotations limited to {0, 90, 180, 270}, `bc81050`/`bcc668` carry no shift
 
 ## Phase 2: fly and the DEM
 - [ ] Install fly 0.14.1. `aoi_footprint_cols()` gains `height_source` (0.12), `dem_shortfall_m`, `dem_elev_sd` (0.14); `aoi_terrain_values()` re-pinned against fly's source; the tests re-pinned
