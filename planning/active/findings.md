@@ -243,3 +243,41 @@ Two causes, both making one photograph's footprint depend on which AOI computed 
   Kwa (pending the DB tunnel). Every item passes check_item.
 - 02 wall time ~10 min per pass for 430 selections (DEM sampling of window + neighbours); Neexdzii
   Kwa (~9.7k published) will take hours.
+
+## Neexdzii Kwa, stage 01 (2026-09-27, code 4d4c82b, fly 0.15.0 @e56d2ec, local fresh-db)
+
+The DB tunnel was not needed: the only DB use is `fresh::frs_watershed_at_measure()` for the AOI
+polygon, and the local `fresh-db` container's `fwapg` has it. Run with `R_ENVIRON_USER=/dev/null`
+and `PG_*_SHARE` pointing at localhost:5432 for the process (watershed 2,319 km2). The local FWA
+may be a different snapshot from the remote; the union makes selection insensitive to it for
+published frames.
+
+- window 14,858; roll neighbours 874 (239 rolls, 57,600 roll frames cached)
+- selected **9,824** = all **9,741** published + 83 new; 169 selected only because published
+  (their DEM footprint no longer reaches the AOI); published ids outside every window: **0**
+- no_bearing **0**; no_thumbnail_url 249; footprint_misses_aoi 4,785
+- rotation_source on selected: measured 2,470, reviewed 1,951, disputed 252,
+  assumed_by_series 4,124, digital 1,027
+- placement_source: correlator 252, roll_model 113, none 9,459
+- height_source: reported 9,076, implausible 192, corrected_unit_slip 2, not judged 554
+
+Two failures on the way: a transient WFS error (retry succeeded), and WFS batches typing
+`ground_sample_distance` differently (fixed in 4d4c82b, `aoi_match_types()`).
+
+## Full rebuild, all four AOIs (2026-09-27, code 4d4c82b, fly 0.15.0 @e56d2ec)
+
+Log `data/logs/rebuild/all_20260927T043156.log` (local). 01 04:32-05:18, 02 05:18-06:46,
+03 06:46-07:29, 05 07:29-07:31 UTC.
+- selected: neexdzii_kwa 9,824; se_a 167; se_b 161; se_c 102 -> **10,100** COGs, every one
+  georeferenced
+- dry-run register `--require-all-published`: 9,976 published + 10,100 local -> 10,100 links;
+  **not rebuilt 0**; every item passes check_item; merge assertions pass
+
+## Known-answer frames (2026-09-27)
+
+Against stac_orthophoto_bc `data/georef_validate/compare/` rasters (the review-page rebuilds):
+
+| frame | rotation | placement | vs validated fly rebuild |
+|---|---|---|---|
+| bc5282 165 (699359) | 0 | none | centre 0 m, width 3,829 = 3,829 |
+| bc83062 123 (840850) | 90 | correlator -120 e, -310 n | width 2,321 = 2,321; centre 332 m = sqrt(120^2 + 310^2), the applied shift |

@@ -29,7 +29,7 @@ publish and geopro reload are a separate step after merge.**
 ## Phase 3: Rotation from the table (replaces the bearing guess)
 - [x] `aoi_rotation_default(film_roll, year)`: `bc5xxx` through 1974 → 0; `bc5xxx` 1975-76 → 90 and flagged for review; every other film series → 90. Aborts on a `bc5xxx` year outside those bins, or on an unrecognised series, rather than guessing — returns NA rather than aborting; `01_fetch.R` stops only when a SELECTED film frame is NA (bc4xxx in the window must not abort a run)
 - [x] `aoi_rotation_for(window)`: film → the table value, else the series default, with `rotation_source`. Digital → `NA` (fly's measured mapping). Replaces `aoi_rotation()` + `aoi_rotation_ok()` in `01_fetch.R`, and both are removed along with their tests
-- [ ] Bearingless film frames: counted per AOI. A per-roll value on an axis-aligned ring assumes the flight ran north, so they go to the ledger as `no_bearing` rather than being written possibly turned. If Neexdzii Kwa has more than a handful, I stop and bring you the count
+- [x] Bearingless film frames: counted per AOI. A per-roll value on an axis-aligned ring assumes the flight ran north, so they go to the ledger as `no_bearing` rather than being written possibly turned. If Neexdzii Kwa has more than a handful, I stop and bring you the count — 0 in every AOI
 - [x] The report lists every roll at `assumed_by_series`, and the 1975-76 `bc5xxx` rolls as "review each"
 - [x] Tests: the series boundaries, the table taking precedence over the default, digital left `NA`, and an unknown series aborting (the bug restored, and each guard shown to fire)
 
@@ -51,15 +51,15 @@ publish and geopro reload are a separate step after merge.**
 - [x] `04_s3_upload.R`: copy every published item JSON to a dated prefix before the sync. Drop `--size-only` for COGs: a rebuilt COG of the same byte size would otherwise be skipped silently — plus validator first, `--checksum-algorithm SHA256`, head-object spot check
 
 ## Phase 7: The union, then the cold rebuild
-- [ ] Selection = new DEM-corrected selection ∪ published `airp_id`s in the window, with a ledger reason for "kept because published". Measure how many published ids fall **outside** every window, and stop and ask if any do
-- [ ] Move the local derived trees aside (`data/raw/georef`, `data/stac`) so the run is **cold**. `fly_georef(overwrite = FALSE)` and `03_cog.R` otherwise skip what exists (CLAUDE.md warns about this)
-- [ ] Run all four AOIs (Neexdzii Kwa needs `fresh` for the watershed, and about 9.7k thumbnail fetches). Logs go to `data/logs/`, and the counts to findings
-- [ ] Dry-run register (`--out`) against the live collection: item count = the union, merge assertions pass, every item carries the checksum and provenance, COG validity on all of them
-- [ ] Known-answer frames: `bc5282` frame 165 and `bc83062` frame 123 against the review page's regenerated rasters (same place to a few metres); counts by `rotation_source`/`placement_source` against the tables
+- [x] Selection = new DEM-corrected selection ∪ published `airp_id`s in the window, with a ledger reason for "kept because published". Measure how many published ids fall **outside** every window, and stop and ask if any do — 0
+- [x] Move the local derived trees aside (`data/raw/georef`, `data/stac`) so the run is **cold**. `fly_georef(overwrite = FALSE)` and `03_cog.R` otherwise skip what exists (CLAUDE.md warns about this)
+- [x] Run all four AOIs (Neexdzii Kwa needs `fresh` for the watershed, and about 9.7k thumbnail fetches). Logs go to `data/logs/`, and the counts to findings
+- [x] Dry-run register (`--out`) against the live collection: item count = the union, merge assertions pass, every item carries the checksum and provenance, COG validity on all of them
+- [x] Known-answer frames: `bc5282` frame 165 and `bc83062` frame 123 against the review page's regenerated rasters (same place to a few metres); counts by `rotation_source`/`placement_source` against the tables
 
 ## Phase 8: Docs and wrap-up
-- [ ] CLAUDE.md and README: Current State, and the Known-issues entries that #23 resolves (film refused, DEM off, digital mis-sized) rewritten or removed, with the publish step documented
-- [ ] `research/` is not needed: the verdicts live in `stac_orthophoto_bc`, and the archive README carries this run's measurements
+- [x] CLAUDE.md and README: Current State, and the Known-issues entries that #23 resolves (film refused, DEM off, digital mis-sized) rewritten or removed, with the publish step documented
+- [x] `research/` is not needed: the verdicts live in `stac_orthophoto_bc`, and the archive README carries this run's measurements
 - [ ] `/planning-archive`, `/gh-pr-push` (closes #23, #28, #29, #30)
 
 ## After merge, on your word (not in this PR)
@@ -67,7 +67,7 @@ Back up the item JSONs → `04_s3_upload.R` → geopro reload → stac_orthophot
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
 - [ ] `/planning-archive` on completion
