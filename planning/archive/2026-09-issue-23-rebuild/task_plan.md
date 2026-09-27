@@ -60,7 +60,7 @@ publish and geopro reload are a separate step after merge.**
 ## Phase 8: Docs and wrap-up
 - [x] CLAUDE.md and README: Current State, and the Known-issues entries that #23 resolves (film refused, DEM off, digital mis-sized) rewritten or removed, with the publish step documented
 - [x] `research/` is not needed: the verdicts live in `stac_orthophoto_bc`, and the archive README carries this run's measurements
-- [ ] `/planning-archive`, `/gh-pr-push` (closes #23, #28, #29, #30)
+- [x] `/planning-archive`, `/gh-pr-push` (closes #23, #28, #29, #30)
 
 ## After merge, on your word (not in this PR)
 Back up the item JSONs → `04_s3_upload.R` → geopro reload → stac_orthophoto_bc#45 re-baselined.
@@ -70,4 +70,4 @@ Back up the item JSONs → `04_s3_upload.R` → geopro reload → stac_orthophot
 - [x] Tests pass
 - [x] `/code-check` clean on each commit
 - [x] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] `/planning-archive` on completion
