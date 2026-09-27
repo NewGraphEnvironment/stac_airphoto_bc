@@ -12,17 +12,15 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 
 ## Current State
 
-- 9,976 georeferenced thumbnail COGs, 1967–2019
-- Two regions: Neexdzii Kwa watershed (9,741) and three small southeast BC AOIs (235)
-- 30.3 GiB on S3 (`s3://stac-airphoto-bc`)
+- 10,100 georeferenced thumbnail COGs, 1967–2019, rebuilt under #23 and published 2026-09-27
+- Two regions: Neexdzii Kwa watershed (9,824) and three small southeast BC AOIs (276 unique)
+- 31.9 GiB on S3 (`s3://stac-airphoto-bc`); the pre-#23 collection and item JSONs are in `backup/*20260927T003819*`
 - Registered on pgstac via `images.a11s.one`
 - GDAL metadata tags embedded in each COG (visible in QGIS)
 - STAC item titles: `airp_id — roll_frame — date`
-- **The published items predate #23.** The #23 rebuild (per-roll rotation,
-  measured placement, DEM-corrected footprints, checksums and provenance) is
-  built locally and replaces them when published — a separate step after merge,
-  on the user's word, because versioning on the bucket is Suspended and the sync
-  overwrites every COG in place
+- Every item carries `file:checksum` and its build provenance (#23, #30); versioning on
+  the bucket is Suspended, so a sync overwrites COGs in place — `04_s3_upload.R` backs
+  up the collection and every item JSON first
 
 ## Architecture
 
@@ -70,9 +68,30 @@ AOIs therefore share a frame rather than publishing it twice.
 outcome, reconciled against the centroid cache. `data/reports/<id>.md` renders
 from it.
 
-Registration on geopro (separate step):
+Registration on geopro (separate step, over the tailnet as `root@geopro`), with the
+**upsert** scripts in `stac_dem_bc` — collection first, then items, then a set-equality
+check against what S3 publishes:
 ```bash
-ssh root@<GEOPRO_IP> "bash /tmp/stac_register-pypgstac.sh stac-airphoto-bc https://stac-airphoto-bc.s3.us-west-2.amazonaws.com"
+cd ~/Projects/repo/stac_dem_bc
+export STAC_COLLECTION=stac-airphoto-bc STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com
+bash scripts/collection_register.sh ~/Projects/repo/stac_airphoto_bc/data/stac/collection.json
+find ~/Projects/repo/stac_airphoto_bc/data/stac -maxdepth 1 -type f -name '*.json' ! -name collection.json \
+  | bash scripts/item_register.sh            # --dryrun first
+bash scripts/catalogue_register.sh --verify
+```
+`catalogue_register.sh --all`/`--drift` cannot be used for this collection: its
+pre-load audit requires a `dem` asset on every item, so it refuses all of ours before
+loading anything (stac_dem_bc#42). `item_register.sh` and `--verify` are generic.
+Not rtj's `stac_register-pypgstac.sh`: it DELETEs the collection before reloading, and
+`pgstac.items.collection` cascades, so a failure between the two leaves the API empty
+(2026-08-29).
+
+The only database the pipeline touches is fwapg, for the Neexdzii Kwa watershed polygon
+(`fresh::frs_watershed_at_measure()`). The local `fresh-db` container serves it; point
+`fresh` at it for one run without editing `~/.Renviron`:
+```bash
+R_ENVIRON_USER=/dev/null PG_HOST_SHARE=localhost PG_PORT_SHARE=5432 PG_DB_SHARE=fwapg \
+  PG_USER_SHARE=postgres PG_PASS_SHARE=postgres Rscript scripts/01_fetch.R neexdzii_kwa
 ```
 
 ### Embedded COG metadata
@@ -234,8 +253,10 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
   populated tree reuses GeoTIFFs whose manifest inputs match, so it reports
   success for frames it did not write this run.
 - `stac_register-pypgstac.sh` on geopro **deletes and reloads** from
-  `collection.json`, so that file is load-bearing. It also aborts after the
-  delete if any item fetch fails, which leaves the collection briefly empty.
+  `collection.json`, and aborts after the delete if any item fetch fails, leaving
+  the collection empty. Register with the `stac_dem_bc` upsert scripts instead
+  (Pipeline, above).
+- The ledger's `aoi_id` holds WFS feature ids, not the AOI id (#32).
 
 <!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 

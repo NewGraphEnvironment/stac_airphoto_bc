@@ -4,15 +4,16 @@ stac_airphoto_bc
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
 ![status](https://img.shields.io/badge/status-functional-green)
-![photos](https://img.shields.io/badge/photos-9741-blue)
+![photos](https://img.shields.io/badge/photos-10100-blue)
 ![api](https://img.shields.io/badge/api-images.a11s.one-orange)
 
 The goal of
 [`stac_airphoto_bc`](https://github.com/NewGraphEnvironment/stac_airphoto_bc)
 is to serve georeferenced historical aerial photograph thumbnails for
 British Columbia as a [STAC](https://stacspec.org/) collection.
-Currently covering the Neexdzii Kwa (Upper Bulkley River) watershed with
-9,741 photos spanning 1963–2019. Queryable by location and time via
+Currently covering the Neexdzii Kwa (Upper Bulkley River) watershed and
+three small southeast BC areas, 10,100 photos spanning 1967–2019.
+Queryable by location and time via
 [`rstac`](https://brazil-data-cube.github.io/rstac/) and [QGIS
 (v3.42+)](https://qgis.org/) at <https://images.a11s.one>.
 
@@ -185,15 +186,15 @@ Browsing the airphoto collection in QGIS STAC Data Source Manager
 
 ## Roadmap
 
-- **Watershed expansion** — the current collection covers the Neexdzii
-  Kwa watershed (9,741 photos, 1963–2019). Extending to additional BC
-  watersheds is the natural next step; the pipeline is parameterized by
-  AOI so adding a watershed is mostly a fetch + georef + register cycle.
-- **Rotation-corrected georeferencing** — landed in the most recent
-  rebuild via [`fly`](https://github.com/NewGraphEnvironment/fly)
-  v0.3.0; tracks the upstream `fly` roadmap for accuracy improvements
-  (footprint geometry from flight metadata: focal length, flying height,
-  tilt).
+- **Area expansion** — the collection covers the Neexdzii Kwa watershed
+  and three small southeast BC areas (10,100 photos, 1967–2019). The
+  pipeline is parameterized by AOI, so adding an area is mostly a
+  fetch + georef + register cycle.
+- **Measured placement beyond the validated area** — per-roll rotation
+  and per-frame shifts come from a validation against orthophotos in and
+  around Neexdzii Kwa; elsewhere rotation follows a per-series default,
+  labelled `assumed_by_series`, and frames stay where the catalogue puts
+  them. Extending the measurement is how those labels change.
 - **Shared STAC-infrastructure direction** — improvements landing in the
   sister `stac_*_bc` repos (true-footprint geometry, uv-based Python
   dependency management, structured logging + benchmarking) apply here
