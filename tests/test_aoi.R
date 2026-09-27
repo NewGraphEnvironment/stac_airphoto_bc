@@ -508,6 +508,23 @@ ok("refuses film sized by fly's digital route", !is.na(msg))
 ok("  ... counts only the clashing frame",
    !is.na(msg) && grepl("^1 frame", msg))
 
+# --- aoi_match_types() ---------------------------------------------------
+# A WFS batch typed on its own contents (an all-null column arrives character)
+# must be cast to the cache's types, and a cast that drops a value must abort.
+
+message("\n# aoi_match_types()\n")
+
+ref <- data.frame(g = 2L, d = as.Date("2000-01-01"), s = "x", n = 1.5)
+got <- aoi_match_types(data.frame(g = NA_character_, d = "2001-02-03", s = 7L, n = "2.25"), ref)
+ok("an all-null character column becomes the reference integer",
+   is.integer(got$g) && is.na(got$g))
+ok("dates, characters and doubles follow the reference",
+   inherits(got$d, "Date") && is.character(got$s) && identical(got$n, 2.25))
+msg <- refusal(aoi_match_types(data.frame(g = c("3", "three")), ref))
+ok("a cast that would drop a value aborts", !is.na(msg))
+ok("  ... naming the column and the value",
+   !is.na(msg) && grepl("`g`", msg, fixed = TRUE) && grepl("three", msg, fixed = TRUE))
+
 # --- Result ---------------------------------------------------------------
 
 message("")

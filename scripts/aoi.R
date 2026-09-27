@@ -399,6 +399,36 @@ aoi_georef_manifest_write <- function(manifest) {
   invisible(manifest)
 }
 
+#' Cast a catalogue query's columns to a reference frame's types, losing nothing
+#'
+#' The WFS types each response on its own contents, so a page or batch whose
+#' `ground_sample_distance` is all null arrives as character beside another where
+#' it is integer, and `bind_rows()` refuses (measured on the Neexdzii Kwa roll
+#' query, 2026-09-27). The centroid cache is the reference. A value that turns NA
+#' in the cast was not NA before is data being dropped, so that aborts rather than
+#' passing quietly.
+aoi_match_types <- function(x, ref) {
+  for (col in intersect(names(x), names(ref))) {
+    cls <- class(ref[[col]])[1]
+    if (identical(class(x[[col]])[1], cls)) next
+    before <- x[[col]]
+    after <- switch(cls,
+      integer   = suppressWarnings(as.integer(as.character(before))),
+      numeric   = suppressWarnings(as.numeric(as.character(before))),
+      character = as.character(before),
+      logical   = as.logical(before),
+      Date      = as.Date(before),
+      stop("aoi_match_types(): no rule for class ", cls, " (", col, ")", call. = FALSE))
+    lost <- is.na(after) & !is.na(before)
+    if (any(lost)) {
+      stop("Casting `", col, "` to ", cls, " would drop ", sum(lost), " value(s), e.g. ",
+           paste(utils::head(unique(before[lost]), 3), collapse = ", "), ".", call. = FALSE)
+    }
+    x[[col]] <- after
+  }
+  x
+}
+
 # --- Registry -------------------------------------------------------------
 # Each entry is `type = "watershed"` (resolved through fresh) or
 # `type = "bbox"` (WGS84 xmin, ymin, xmax, ymax).

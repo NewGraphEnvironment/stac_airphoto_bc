@@ -95,12 +95,13 @@ for (id in ids) {
   stale_nbr <- file.exists(nbr_cache) && file.mtime(nbr_cache) < file.mtime(cache)
   if (FORCE_REFRESH || stale_nbr || !all(rolls %in% cached_rolls)) {
     batches <- split(rolls, ceiling(seq_along(rolls) / 40))
+    ref <- arrow::read_parquet(cache)
     roll_rows <- purrr::map_dfr(batches, function(b) {
       x <- bcdata::bcdc_query_geodata(BCDC_CENTROIDS) |>
         bcdata::filter(FILM_ROLL %in% !!b) |>
         bcdata::collect()
       names(x) <- tolower(names(x))
-      sf::st_drop_geometry(x)
+      aoi_match_types(as.data.frame(sf::st_drop_geometry(x)), ref)
     })
     missing_rolls <- setdiff(rolls, roll_rows$film_roll)
     if (length(missing_rolls)) {
