@@ -156,7 +156,7 @@ properties disagree.
 | `airphoto:rotation`, `airphoto:rotation_source` | film only. `measured` / `reviewed` / `disputed` (`bc81050`, `bcc668`) from `data-raw/rotation_roll.csv`; `assumed_by_series` from `aoi_rotation_default()` — `bc5xxx` ≤1974 → 0, `bc5xxx` 1975-76 → 90 and review each, every other series → 90 |
 | `airphoto:placement_source`, `airphoto:shift_x_m_3005`, `airphoto:shift_y_m_3005` | from `data-raw/placement_frame.csv`: `manual` / `correlator` / `roll_model` / `none`; metres east/north, applied to the raster after georeferencing, never to the centroids |
 | `airphoto:height_source` | fly's: `reported`, `corrected_unit_slip` (fly#54), `corrected_roll_table` (fly#60, logbook-read roll heights), `implausible`; absent where fly did not judge a height (GSD-sized digital). Open vocabulary: fly owns it |
-| `nge:fly_version`, `nge:fly_sha`, `nge:pipeline_sha` | the run; `<commit>-dirty-<hash>` when `scripts/` or `data-raw/` had uncommitted changes (`scripts/pipeline_sha.sh`, shared by R and Python) |
+| `nge:fly_version`, `nge:fly_sha`, `nge:pipeline_sha` | the run. `pipeline_sha` is the last commit that changed the code (`scripts/`, `data-raw/`, markdown excluded), so a docs commit between a run and its publish does not relabel it; `<commit>-dirty-<hash>` when that code had uncommitted changes (`scripts/pipeline_sha.sh`, shared by R and Python). `03_cog.py` refuses windows stamped with another |
 | `nge:produced_datetime` | the COG's mtime, which moves only when its bytes do |
 
 `file:checksum` (sha256 multihash, `1220…`) and `file:size` on the `thumbnail`
