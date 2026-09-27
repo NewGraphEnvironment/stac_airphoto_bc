@@ -66,10 +66,15 @@ message("Fetched: ", sum(fetch_results$success), "/", nrow(fetch_results))
 # --- 02: Georef ----------------------------------------------------------
 
 message("\n=== GEOREF ===")
+# fly_georef() is handed the WINDOW frames on the sampled rolls, so the rolls are intact
+# and the sample is placed on the bearings the ledger records (#28). Handed the
+# 3-per-year sample, nearly every frame would lose its roll neighbour.
+window <- aoi_centroids_as_sf(arrow::read_parquet(aoi_path("window", id))) |>
+  dplyr::mutate(year = as.integer(photo_year))
 georef_results <- purrr::map_dfr(years, function(yr) {
   ids <- test_set$airp_id[test_set$year == yr]
   fr <- dplyr::filter(fetch_results, airp_id %in% ids, success)
-  ph <- dplyr::filter(test_set, airp_id %in% fr$airp_id)
+  ph <- window[window$film_roll %in% test_set$film_roll[test_set$airp_id %in% fr$airp_id], ]
   if (nrow(fr) == 0) return(tibble::tibble())
   message("  ", yr, ": ", nrow(fr), " photos")
   fly::fly_georef(
@@ -84,7 +89,10 @@ message("Georeffed: ", sum(georef_results$success), "/", nrow(georef_results))
 # --- 03: COG -------------------------------------------------------------
 
 message("\n=== COG ===")
-source("scripts/03_cog.R")
+exit_code <- system(
+  "conda run --no-capture-output -n stac-airphoto-bc python scripts/03_cog.py"
+)
+if (exit_code != 0) stop("COG stage failed with exit code ", exit_code, call. = FALSE)
 
 # --- 04: STAC register ----------------------------------------------------
 # Before the upload, not after — the sync must carry the item JSONs and

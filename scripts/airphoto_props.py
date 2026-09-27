@@ -172,3 +172,124 @@ def catalogue_assets(meta: dict) -> dict:
         assets[key] = asset
 
     return assets
+
+
+# --- How the item was built (#23, #30) -----------------------------------
+#
+# The catalogue says what the photograph is; these say how this pipeline placed
+# it. `airphoto:` for facts about the frame's georeferencing, `nge:` for the run
+# that produced it — the same prefix `stac_floodplains_bc` uses for run
+# provenance, so one query spans both collections.
+
+# window column -> item property
+BUILD_PROPERTY_FIELDS = {
+    "footprint_basis": "airphoto:footprint_basis",
+    "height_source": "airphoto:height_source",
+    "rotation": "airphoto:rotation",
+    "rotation_source": "airphoto:rotation_source",
+    "placement_source": "airphoto:placement_source",
+    "shift_x_m_3005": "airphoto:shift_x_m_3005",
+    "shift_y_m_3005": "airphoto:shift_y_m_3005",
+    "fly_version": "nge:fly_version",
+    "fly_sha": "nge:fly_sha",
+    "pipeline_sha": "nge:pipeline_sha",
+}
+
+# Closed vocabularies. A value outside one is a change upstream (a new fly route,
+# a new table source), and publishing it unread is how a filter silently stops
+# matching; the validator refuses it.
+ROTATION_SOURCES = ("measured", "reviewed", "disputed", "assumed_by_series")
+PLACEMENT_SOURCES = ("manual", "correlator", "roll_model", "none")
+
+# Every item built from #23 on carries these. Named, not derived from the data: a
+# check that compares items to each other cannot see a key missing from all of
+# them (the floodplains lesson, `item_validate.check_provenance`).
+REQUIRED_BUILD_PROPERTIES = (
+    "airphoto:placement_source",
+    "airphoto:shift_x_m_3005",
+    "airphoto:shift_y_m_3005",
+    "nge:fly_version",
+    "nge:fly_sha",
+    "nge:pipeline_sha",
+    "nge:produced_datetime",
+)
+# ... and every FILM item carries these too. Digital frames take fly's measured
+# corner mapping and have no scanning rotation to report.
+REQUIRED_FILM_PROPERTIES = ("airphoto:rotation", "airphoto:rotation_source")
+
+FILE_EXTENSION = "https://stac-extensions.github.io/file/v2.1.0/schema.json"
+_MULTIHASH_SHA256 = "1220"
+
+
+def _absent(value) -> bool:
+    # NaN is how pyarrow hands back a missing double; publishing it would put
+    # `NaN` in JSON, which is not JSON.
+    return value is None or (isinstance(value, float) and value != value)
+
+
+def build_properties(meta: dict) -> dict:
+    """`airphoto:`/`nge:` build properties for one window row, absent values omitted."""
+    props = {}
+    for field, key in BUILD_PROPERTY_FIELDS.items():
+        value = meta.get(field)
+        if _absent(value):
+            continue
+        if field == "rotation":
+            value = int(value)
+        elif field.startswith("shift_"):
+            value = float(value)
+        props[key] = value
+    return props
+
+
+def file_meta(path) -> dict:
+    """`file:checksum` + `file:size` for one asset, per the STAC file extension.
+
+    The checksum is a MULTIHASH, hex lowercase: `1220` + sha256. The schema only
+    checks `^[a-f0-9]+$`, so a bare digest with no prefix validates cleanly; the
+    shape is asserted here instead.
+
+    Safe only on a byte-final file: `03_cog.py` writes each COG once and nothing
+    touches it afterwards (#30). A later step that edits a COG in place would
+    publish a checksum that silently does not match the object.
+    """
+    import hashlib
+    from pathlib import Path
+
+    path = Path(path)
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    checksum = _MULTIHASH_SHA256 + h.hexdigest()
+    if len(checksum) != 68 or not checksum.startswith(_MULTIHASH_SHA256):
+        raise ValueError(f"Malformed multihash for {path}: {checksum!r}")
+    return {"file:checksum": checksum, "file:size": path.stat().st_size}
+
+
+def cog_layout_ok(path) -> bool:
+    """True when the file is still laid out as the COG it claims to be.
+
+    GDAL writes a ghost header into every COG. An in-place edit that breaks the
+    layout moves the IFD to the end of the file and flips
+    KNOWN_INCOMPATIBLE_EDITION to YES, while LAYOUT=IFDS_BEFORE_DATA stays — so
+    the LAYOUT claim alone is not evidence. Both the flag and the offset are
+    checked: the first IFD must sit right behind the ghost header, which a size
+    bound alone cannot tell on a file small enough to end inside it.
+    """
+    import re
+    import struct
+    from pathlib import Path
+
+    head = Path(path).read_bytes()[:4096]
+    if len(head) < 16 or head[:4] != b"II*\x00":
+        return False
+    m = re.search(rb"GDAL_STRUCTURAL_METADATA_SIZE=(\d{6}) bytes\n", head[8:])
+    if not m or m.start() != 0:
+        return False
+    ghost_end = 8 + m.end() + int(m.group(1))
+    ghost = head[8:ghost_end]
+    first_ifd = struct.unpack("<I", head[4:8])[0]
+    return (b"LAYOUT=IFDS_BEFORE_DATA" in ghost
+            and b"KNOWN_INCOMPATIBLE_EDITION=NO" in ghost
+            and ghost_end <= first_ifd <= ghost_end + 8)

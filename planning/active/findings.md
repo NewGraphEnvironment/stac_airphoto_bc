@@ -187,3 +187,59 @@ fly#60 (FLYING_HEIGHT under half of scale x focal) is being worked in parallel. 
 subtracted, frames falling below fly's 1/1.6 band and so to nominal scale: 5 / 78 / 192 at an
 assumed 500 / 800 / 1,200 m ground. Those size as they do today; `height_source` marks them.
 Rebuild on whatever fly is current at Phase 7.
+
+## Published COGs are also wrong in nodata and colour interpretation (2026-09-26, plan review)
+
+`terra::writeRaster(filetype = "COG")` in the old 03_cog.R set NoData=255 and dropped colour
+interpretation. Measured on `bcc98035_140`: raw fly output is R/G/B/Alpha with a per-dataset
+alpha mask; the published COG is 4x `undefined`, NoData=255 on every band, so the alpha-masked
+interior reads as nodata. Grey frames gained NoData=255, masking genuine white. The rasterio
+single-write in 03_cog.py keeps count, dtype, nodata, colour interp, mask flags and every pixel
+(asserted per file in `check_same_raster()`).
+
+## Placement shift equals fly's warp of a shifted footprint (2026-09-26)
+
+`fly:::georef_one(src, shift_footprint(fp, 137.3, -241.9), srcnodata = NULL, mask = "border")`
+against `03_cog.write_cog(raw, dx = 137.3, dy = -241.9)`, fp built as fly_georef builds it
+(`fly_footprint(roll frames, dem) |> st_transform(3005)`), se_c:
+
+| frame | rotation | bands | bounds diff | shape | max pixel diff |
+|---|---|---|---|---|---|
+| 1259565 bc5255_204 | 0 | 1 | 0 m (1e-6) | 1768 x 1768 identical | 1 DN |
+| 272493 bcc98035_145 | 90 | 4 | 0 m (1e-6) | 1764 x 1764 identical | 0 |
+
+Digital not compared: fly's digital corner mapping is internal to fly_georef, and the
+translation property does not depend on rotation (the warp grid follows the GCP extent).
+Scratch: `scratchpad/equiv/` (session-local).
+
+## se_c smoke run, cold (2026-09-26, fly 0.14.1 @988d1b1, DEM on)
+
+- window 1,013; selected 102 (100 by footprint, 2 because published); no_bearing 0;
+  no_thumbnail_url 3; DEM coverage 0.975-1.
+- 02: **102 / 102 georeferenced** (was 11 / 88 before this branch, film refused).
+- 03: 102 COGs; determinism holds; re-run writes 0 (content-compare).
+- 05 dry run: 9,976 published + 102 local -> 10,000 links (24 new frames); every item passes
+  check_item (checksum, layout, tags vs properties, vocabularies).
+- rotation_source on selected: 89 assumed_by_series, 3 reviewed (bc5300, measured in NK and
+  also flown over se_c), 10 digital.
+
+## A shared frame was sized differently by each AOI (2026-09-26, code-check round 3)
+
+Two causes, both making one photograph's footprint depend on which AOI computed it:
+- **DEM grid**: `fl_dem_aoi(target_crs = 3005)` reprojects each AOI's crop onto its own grid.
+  Fixed: crop on MRDEM's native grid/CRS (`aoi_dem_source()`); fly transforms footprints to it.
+- **Bearing**: `fly_bearing()` uses the next frame, else the previous. Window-edge frames differ
+  by AOI: **74 of 669** se_a/se_b shared window frames, up to ~2 degrees. Fixed: pad each window
+  with +/-1 roll neighbours from a per-roll catalogue query (`data/neighbours/`). After: **0 of
+  669** bearings and digests differ.
+- DEM margin raised 6,000 -> 10,000 m: the union keeps published frames anywhere in the window;
+  se_a had 7 selected frames 2,008 m past the old DEM (guard fired, as designed).
+
+## se AOIs cold rebuild (2026-09-26, fly 0.15.0 @e56d2ec)
+
+- selected se_a 167, se_b 161, se_c 102 -> 276 unique frames; 02 all georeferenced; second 02
+  pass regenerates 0; 03 writes 276 COGs.
+- 05 dry run: 9,976 + 276 -> 10,017 links (41 new frames); not rebuilt 9,741 = exactly Neexdzii
+  Kwa (pending the DB tunnel). Every item passes check_item.
+- 02 wall time ~10 min per pass for 430 selections (DEM sampling of window + neighbours); Neexdzii
+  Kwa (~9.7k published) will take hours.

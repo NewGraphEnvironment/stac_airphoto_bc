@@ -52,6 +52,16 @@ CONDA_RUN="conda run --no-capture-output -n stac-airphoto-bc"
 SYNC=1
 [ "${1:-}" = "--no-sync" ] && SYNC=0
 
+# The backfill patched items published before #23. Once the rebuild has written
+# items that carry `file:checksum`, promoting the patched tree would copy the old
+# geometry back over them and re-register it. Refuse rather than revert.
+# find, not a glob: 10k item filenames can exceed ARG_MAX (see step 2).
+if [ -d "$STAC" ] && [ -n "$(find "$STAC" -maxdepth 1 -name '*.json' -exec grep -l '"file:checksum"' {} + 2>/dev/null | head -1)" ]; then
+  echo "Items in $STAC carry file:checksum: they are from the #23 rebuild, and" >&2
+  echo "promoting $PATCHED would overwrite them with pre-rebuild items. Refusing." >&2
+  exit 1
+fi
+
 if [ ! -d "$PATCHED" ]; then
   echo "No $PATCHED. Run:" >&2
   echo "  Rscript scripts/06_catalogue_fetch.R" >&2

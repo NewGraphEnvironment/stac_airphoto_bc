@@ -18,13 +18,20 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 - Registered on pgstac via `images.a11s.one`
 - GDAL metadata tags embedded in each COG (visible in QGIS)
 - STAC item titles: `airp_id — roll_frame — date`
+- **The published items predate #23.** The #23 rebuild (per-roll rotation,
+  measured placement, DEM-corrected footprints, checksums and provenance) is
+  built locally and replaces them when published — a separate step after merge,
+  on the user's word, because versioning on the bucket is Suspended and the sync
+  overwrites every COG in place
 
 ## Architecture
 
 Built on [fly](https://github.com/NewGraphEnvironment/fly). No version is pinned:
 `aoi_require_fly()` (`scripts/aoi.R`) asserts the capability instead — that `dem`
-reaches `fly_filter()`, `fly_footprint()` and `fly_georef()`. Developed against
-fly 0.10.0.
+reaches `fly_filter()`, `fly_footprint()` and `fly_georef()` — and
+`aoi_check_footprint_cols()` that `fly_footprint()` returns `height_source`
+(fly#54's `flying_height` check). Every item records the fly version and SHA
+that built it (`nge:fly_version`, `nge:fly_sha`).
 
 ### fly package provides
 
@@ -38,11 +45,11 @@ fly 0.10.0.
 
 | Step | Script | What |
 |------|--------|------|
-| Fetch | `01_fetch.R` | Query BC Data Catalogue centroids, select by footprint overlap, write the ledger, download thumbnails |
-| Georef | `02_georef.R` | Warp thumbnails to ground footprints (BC Albers 3005) |
-| COG | `03_cog.R` + `03_cog_tag.py` | Convert to COGs (DEFLATE), embed GDAL metadata tags via rasterio |
-| STAC | `05_stac_register.py` | Generate items, **merge** into the published collection, validate |
-| S3 | `04_s3_upload.R` | Back up `collection.json`, then `aws s3 sync` (never `--delete`) |
+| Fetch | `01_fetch.R` | Query BC Data Catalogue centroids, size DEM-corrected footprints, assign per-roll rotation and per-frame placement, select footprint overlap ∪ already published, write the window and the ledger, download thumbnails |
+| Georef | `02_georef.R` | Warp thumbnails to ground footprints (BC Albers 3005), handing fly the intact rolls |
+| COG | `03_cog.py` | Translate by the placement shift, tag, write each COG once (DEFLATE) via rasterio |
+| STAC | `05_stac_register.py` | Generate items with `file:checksum` and provenance, **merge** into the published collection, validate |
+| S3 | `04_s3_upload.R` | `stac_validate.py`, back up `collection.json` and every item JSON, then `aws s3 sync` (never `--delete`) |
 | Backfill | `06_catalogue_fetch.R` + `06_catalogue_backfill.py` + `06_catalogue_validate.py` + `06_catalogue_promote.sh` | Add the catalogue metadata to items published before #21, whose COGs are no longer on any machine here |
 
 Registration runs **before** the sync, so a run uploads its own STAC output.
@@ -71,9 +78,15 @@ ssh root@<GEOPRO_IP> "bash /tmp/stac_register-pypgstac.sh stac-airphoto-bc https
 ### Embedded COG metadata
 
 Each COG carries GDAL tags (visible in QGIS Layer Properties → Information):
-`AIRP_ID`, `PHOTO_DATE`, `SCALE`, `FILM_ROLL`, `FRAME_NUMBER`, `FOCAL_LENGTH`, `FLYING_HEIGHT`, `FILENAME`
+`AIRP_ID`, `PHOTO_DATE`, `SCALE`, `FILM_ROLL`, `FRAME_NUMBER`, `FOCAL_LENGTH`, `FLYING_HEIGHT`, `FILENAME`,
+and since #23 `FOOTPRINT_BASIS`, `HEIGHT_SOURCE`, `ROTATION`, `ROTATION_SOURCE`,
+`PLACEMENT_SOURCE`, `SHIFT_X_M_3005`, `SHIFT_Y_M_3005`, `FLY_VERSION`, `FLY_SHA`, `PIPELINE_SHA`.
 
-Tags set via `03_cog_tag.py` (rasterio) because `terra::metags` can't persist custom tags.
+Set by `03_cog.py` on an in-memory copy before the one COG write (#30). Tagging a
+finished COG in place (`r+`, `IGNORE_COG_LAYOUT_BREAK`) moves the IFD to the end
+and flips the ghost header's `KNOWN_INCOMPATIBLE_EDITION` to `YES`; that is what
+the old `03_cog_tag.py` did. No run timestamp is tagged: the write is
+deterministic, so an unchanged frame keeps its bytes and its checksum.
 
 ### Source data
 
@@ -132,6 +145,25 @@ backfill read, so they cannot drift.
 Assets `patb_georef`, `camera_calibration` and `flight_log` link the catalogue's
 retrievable files. Their contents are **not** parsed — see Known issues.
 
+### Build properties on items (#23, #30)
+
+From `data/window/<aoi>.parquet` via `airphoto_props.build_properties()`, and
+mirrored in the COG tags; `stac_validate.py` refuses an item whose tags and
+properties disagree.
+
+| property | note |
+|---|---|
+| `airphoto:rotation`, `airphoto:rotation_source` | film only. `measured` / `reviewed` / `disputed` (`bc81050`, `bcc668`) from `data-raw/rotation_roll.csv`; `assumed_by_series` from `aoi_rotation_default()` — `bc5xxx` ≤1974 → 0, `bc5xxx` 1975-76 → 90 and review each, every other series → 90 |
+| `airphoto:placement_source`, `airphoto:shift_x_m_3005`, `airphoto:shift_y_m_3005` | from `data-raw/placement_frame.csv`: `manual` / `correlator` / `roll_model` / `none`; metres east/north, applied to the raster after georeferencing, never to the centroids |
+| `airphoto:height_source` | fly's: `reported`, `corrected_unit_slip` (fly#54), `corrected_roll_table` (fly#60, logbook-read roll heights), `implausible`; absent where fly did not judge a height (GSD-sized digital). Open vocabulary: fly owns it |
+| `nge:fly_version`, `nge:fly_sha`, `nge:pipeline_sha` | the run; `<commit>-dirty-<hash>` when `scripts/` or `data-raw/` had uncommitted changes (`scripts/pipeline_sha.sh`, shared by R and Python) |
+| `nge:produced_datetime` | the COG's mtime, which moves only when its bytes do |
+
+`file:checksum` (sha256 multihash, `1220…`) and `file:size` on the `thumbnail`
+asset, file extension v2.1.0. The measured tables are imported from the private
+`stac_orthophoto_bc` by `data-raw/tables_import-georef_validate.R`, which stamps
+the source commit on line 1 of each CSV.
+
 Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
 1,775, `patb_georef` 1,775, `camera_calibration` 1,302, `flight_log` 8,133.
 `georef_metadata_ind` and `patb_georef_url` are perfectly diagonal.
@@ -140,73 +172,67 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
 
 - `data/centroids/<aoi>.parquet` — cached BC Data Catalogue query, one per AOI (gitignored, re-query with `FORCE_REFRESH = TRUE`)
 - `data/catalogue/published.parquet` — catalogue rows for every **published** item id, for the backfill; keyed to the live `collection.json`, so re-fetch it rather than reusing an old one
-- `fly_filter()` re-runs fresh each time (footprint estimates may change)
+- `data/catalogue/published.parquet` is also the **published-id snapshot** `01_fetch.R` selects the union on (`aoi_published_ids()`)
+- `data/neighbours/<aoi>.parquet` — every catalogue frame on the window's rolls, cached; the window is padded with each frame's ±1 roll neighbours (`in_window = FALSE`) so `fly_bearing()` — which takes a heading from the next frame, else the previous — gives a frame the same bearing whichever AOI's window it sits in (74 of 669 frames shared by se_a/se_b differed without it)
+- `data/window/<aoi>.parquet` — the whole fetch window as `01_fetch.R` sized it, neighbours included; `02_georef.R`, `03_cog.py` and `05_stac_register.py` read it
+- `data/dem/<aoi>.tif` — MRDEM-30 cropped on its **own** grid and CRS, never reprojected, so every AOI reads the same cells for shared ground
 - `fly_fetch(overwrite = FALSE)` skips existing files on disk
-- `03_cog.R` skips existing COGs; `03_cog_tag.py` skips already-tagged COGs
+- `fly_georef(overwrite = FALSE)` reuses a GeoTIFF only when `data/raw/georef/manifest.csv` records the same rotation, bearing, footprint digest, fly SHA, pipeline SHA and source-JPG md5; otherwise `02_georef.R` deletes it first. `03_cog.py` refuses any GeoTIFF the manifest and the ledgers do not vouch for, and any orphan COG
+- `03_cog.py` rewrites every COG but replaces the file only when the bytes differ
 
 ### Known issues
 
-- Diagonal flight lines (~230°, ~45° bearings) may still have rotation issues (fly#26). Workaround: set `rotation` column per roll.
-- The `fly_georef(rotation = "auto")` rebuild (#13) **shipped 2026-03-12**. The
-  successor — fly 0.9, per-roll `rotation`, DEM-corrected footprints — is #23
+- The `fly_georef(rotation = "auto")` rebuild (#13) shipped 2026-03-12; #23 is
+  its successor
 - 249/9,990 photos missing thumbnail URLs in BC catalogue
 - **PAT-B files are linked, not parsed** (#21). They arrive in four spellings —
   `.ori`, `.ORI`, `.zip`, `.csv`, `.OR` — keyed three different ways (by
   `airp_id`, by `roll_frame`, and by an internal photo number we have no join
   for), and they are **shared bundles**: 1,775 items point at **12** distinct
   files, so an asset href does not identify which record inside the file is this
-  frame. Reading them belongs with #23, which needs the exterior orientation to
-  produce a corrected footprint.
+  frame. #23 did not read them: it sizes with fly and a DEM, which the private
+  validation checked against these solutions (width within 0-2%). Reading the
+  exterior orientation directly is still open.
 - **`HEAD` is not a liveness probe for `openmaps.gov.bc.ca`.** It answers 404 for
   URLs a ranged `GET` serves 206 for, including flight logs `fly::fly_fetch()`
   downloads successfully. A HEAD-based check would report every metadata asset
   in the collection dead.
-- **`fly_footprint()` reports six columns, not four.** `footprint_basis`,
-  `footprint_terrain`, `width_source`, `footprint_bearing`, `height_agl` and
-  `dem_coverage`, all carried to the ledger since #20. `width_source` arrived in
-  fly 0.6.0 and `footprint_bearing` in 0.9.0, and a set written against an older
-  fly is a guard that cannot see the newer columns going missing —
-  `aoi_footprint_cols()` is the one place to widen when fly adds another.
-- **Digital frames now size, and no longer match what is published.** fly 0.6.0
-  sizes them from `pixel count x ground_sample_distance` (fly#32), so the
-  exclusion this section used to record is over: re-measured on `se_c` at fly
-  0.10.0, **188 of 1,013** frames gain a footprint that fly 0.5.0 refused, and
-  15 are still unsized. The published Neexdzii Kwa items predate all of it and
-  were sized as 9-inch negatives — `bcd12008` ships an 11,435 m footprint
-  against 2,286–7,242 m for film. Those wrong items are still published; #23
-  rebuilds them.
-- **Upgrading fly moves film selection too, which the #20 issue body did not
-  anticipate.** fly 0.9.0 rotates every footprint onto its flight line, and a
-  square rotated 45° overlaps its axis-aligned self by only 83%. Measured on
-  `se_c`: 12 film frames changed rejection outcome across the 0.5.0 → 0.10.0
-  upgrade, 6 each way, every one of them on a diagonal bearing. So "film output
-  is unchanged" held only through fly 0.8.x.
-- **Film frames are refused by `fly_georef()` until #23 lands the per-roll
-  rotation table, and that is deliberate.** fly 0.9.0 rotates every film
-  footprint onto its flight line and then refuses such a frame unless given that
-  roll's rotation, because the corner mapping is a per-roll camera-mount property
-  it cannot derive. A user `rotation` column is the highest-precedence input
-  (`fly/R/fly_georef.R:316`, refusal at `:322`) and **disarms that refusal** — measured
-  on 11 real 1995 frames, 11/11 written with the column against 0/11 and 11
-  refusal warnings without it. `aoi_rotation()` derives the value per frame from
-  bearing, so it varies *within* a roll where the property is a per-roll
-  constant: **34 of 48 rolls** on `se_c` get two to four different values, so at
-  most one per roll can be right, and the wrong ones produce a valid GeoTIFF over
-  the right ground with the picture turned and `success = TRUE`.
-  `aoi_rotation_ok()` therefore supplies a rotation only where fly has *not*
-  rotated the ring — `is.na(footprint_bearing)`, fly's own routing condition —
-  and only for film. Measured cold on `se_c`: **11 of 88** georeferenced, the 10
-  digital 2018 frames plus one unrotated film frame; the other 77 land as
-  `georef_failed`. Loud and visible beats 807 frames written possibly turned.
-  **Check the cold path when measuring this** — `fly_georef(overwrite = FALSE)`
-  skips existing GeoTIFFs, so a re-run over a populated tree reports 88/88.
-- **DEM-corrected footprints are wired and off.** `aoi_dem_enabled()` returns
-  `FALSE`; flipping it threads MRDEM-30 through `flooded::fl_dem_aoi()` into the
-  one `fly_footprint()` call that selection reads. Applying it to one region
-  only would leave the collection half-corrected, so it waits for #23 to rebuild
-  both. Measured on `se_c` with it on: selection 88 → 104, `dem_coverage` min
-  0.975 and median 1.0 with none below fly's 0.95 threshold, and the 15
-  otherwise-unsizeable frames all gain footprints.
+- **`fly_footprint()` reports nine columns**, all carried to the ledger:
+  `footprint_basis`, `footprint_terrain`, `width_source`, `footprint_bearing`,
+  `height_agl`, `dem_coverage`, `height_source` (0.12.0), `dem_shortfall_m` and
+  `dem_elev_sd` (0.14.0). `aoi_footprint_cols()` is the one place to widen when
+  fly adds another, and `tests/test_aoi.R` fails when the installed fly adds one
+  nobody declared. `01_fetch.R` aborts on any `dem_shortfall_m > 0` among selected
+  frames, since the cached DEM is otherwise reused as-is.
+- **The published COGs are wrong in three ways until the #23 rebuild is
+  published.** Rotation was guessed per frame from bearing (it is a per-roll
+  constant); film was sized without terrain (fitted scale 0.909 against
+  orthophotos) and 2012 digital as 9-inch negatives (`bcd12008` ships 11,435 m;
+  the photogrammetric solution says ~5,193 m). And the files themselves: the old
+  `terra::writeRaster(filetype = "COG")` set NoData=255 and dropped colour
+  interpretation (an RGBA frame's alpha-masked interior reads as nodata), and
+  in-place tagging broke the COG layout.
+- **Rotation is a per-roll constant, supplied as a column, and that deliberately
+  disarms fly's refusal.** fly 0.9+ rotates each footprint onto its flight line
+  and refuses a film frame without its roll's rotation, because the corner
+  mapping records how the negative was scanned. A user `rotation` column is the
+  highest-precedence input, so a wrong value writes a valid GeoTIFF turned a
+  quarter turn with `success = TRUE`. That is why the value is measured or
+  series-assumed per roll, labelled, and never derived per frame; and why a frame
+  with **no bearing** (an axis-aligned ring, where the value would assume the
+  aircraft flew north) is withheld as `no_bearing` rather than written.
+- **Assumed rotations are a series rule, and one bin has no reliable default.**
+  `bc5xxx` rolls flown 1975-76 take 90 and every one is listed in the AOI report
+  for review by eye; their three measured neighbours disagree (two at 90, one at
+  180). A wrong default is 90° off and visible, not subtly wrong.
+- **Roll-model placements are carried past what was measured.** Of the 211
+  `roll_model` frames on three rolls, 135 lie outside the measured area, where
+  the roll's shift is extrapolated along the roll untested.
+- **`scripts/run_pipeline.sh` and `scripts/test_pipeline.R` both end in the S3
+  upload.** Run the stages individually when the result must not be published.
+- **Check the cold path when measuring georeferencing.** A re-run over a
+  populated tree reuses GeoTIFFs whose manifest inputs match, so it reports
+  success for frames it did not write this run.
 - `stac_register-pypgstac.sh` on geopro **deletes and reloads** from
   `collection.json`, so that file is load-bearing. It also aborts after the
   delete if any item fetch fails, which leaves the collection briefly empty.
