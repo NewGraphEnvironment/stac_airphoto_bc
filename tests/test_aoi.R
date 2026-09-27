@@ -106,7 +106,9 @@ ok("  ... names all three",
 # The remedy has to be in the message. A refusal that says what is wrong and not
 # what to do sends the reader to the git log.
 ok("  ... names the remedy",
-   !is.na(msg) && grepl("0.5.1", msg, fixed = TRUE))
+   !is.na(msg) && grepl("install_github", msg, fixed = TRUE))
+ok("  ... names the release the rebuild needs",
+   !is.na(msg) && grepl("0.12.0", msg, fixed = TRUE))
 
 # --- aoi_check_footprint_cols() -------------------------------------------
 # The fly#35 guard. It was hoisted out of 01_fetch.R specifically so it could be
@@ -232,8 +234,11 @@ expected_cols <- c(
   "aoi_id", "airp_id", "film_roll", "frame_number",
   "photo_year", "era", "footprint_basis",
   "footprint_terrain", "width_source", "footprint_bearing",
-  "height_agl", "dem_coverage",
-  "rotation", "thumbnail_image_url", "rejected_reason"
+  "height_agl", "dem_coverage", "height_source",
+  "dem_shortfall_m", "dem_elev_sd",
+  "rotation", "rotation_source",
+  "placement_source", "shift_x_m_3005", "shift_y_m_3005",
+  "thumbnail_image_url", "selection_basis", "rejected_reason"
 )
 
 ok("schema matches the declared contract", identical(cols, expected_cols))
@@ -255,7 +260,7 @@ ok("no duplicates", !anyDuplicated(cols))
 #      `footprint_basis` and `footprint_terrain` — the two columns whose loss
 #      #20 exists to prevent. Deleting both from the code left this green.
 fetch_src <- paste(readLines("scripts/01_fetch.R", warn = FALSE), collapse = "\n")
-block <- sub(".*ledger <- window \\|>", "", fetch_src)
+block <- sub(".*ledger <- window\\[window\\$in_window, \\] \\|>", "", fetch_src)
 ok("the transmute block was actually located",
    nchar(block) < nchar(fetch_src))
 block <- sub("sel_ids <-.*", "", block)
@@ -398,103 +403,127 @@ wide$width_source <- logical(0)
 ok("tolerates an extra column",
    is.na(refusal(aoi_ledger_check_cols(wide, "se_a"))))
 
-# --- aoi_rotation_ok() ----------------------------------------------------
-# What keeps a `rotation` off the frames fly must decide for itself. Two arms,
-# and round 3 proved the second one was missing entirely:
-#   digital            -> NA, so fly uses its measured corner mapping
-#   film, ring rotated -> NA, so fly REFUSES rather than being handed a
-#                         per-frame value where the property is per-roll
-# Only film with an unrotated ring may carry one.
+# --- aoi_rotation_default() -----------------------------------------------
+# The series rule for rolls nobody measured (#23). Re-typed from the #23 body and
+# research section 14, not derived from the function: a boundary moved by a year
+# must go red here.
 
-message("\n# aoi_rotation_ok()\n")
+message("\n# aoi_rotation_default()\n")
 
-med  <- c("Film - BW", "Film - BW", "Digital - Colour", "Digital - Colour")
-terr <- c("nominal_scale", "nominal_scale", "gsd_scaled", "gsd_scaled")
-bear <- c(NA_real_, 231.4, NA_real_, 47.2)
+ok("bc5xxx through 1974 is 0",
+   identical(aoi_rotation_default(c("bc5281", "bc5420", "bc5596"), c(1968, 1972, 1974)),
+             c(0L, 0L, 0L)))
+ok("bc5xxx 1975-76 is 90",
+   identical(aoi_rotation_default(c("bc5688", "bc5700"), c(1975, 1976)), c(90L, 90L)))
+ok("  ... and is flagged for review",
+   identical(aoi_rotation_needs_review(c("bc5688", "bc5700", "bc5596", "bc7796"),
+                                       c(1975, 1976, 1974, 1976)),
+             c(TRUE, TRUE, FALSE, FALSE)))
+ok("bc5xxx after 1976 has no default, not a guess",
+   is.na(aoi_rotation_default("bc5800", 1977)))
+ok("bc5xxx with no year has no default",
+   is.na(aoi_rotation_default("bc5300", NA)))
+ok("bc7xxx on, bcb and bcc are 90",
+   identical(aoi_rotation_default(c("bc7796", "bc78065", "bc83062", "bcb98013", "bcc00085", "bcc668"),
+                                  c(1977, 1978, 1983, 1998, 2000, 1990)),
+             rep(90L, 6)))
+ok("an unknown series has no default",
+   all(is.na(aoi_rotation_default(c("bcd12008", "xx5281", "bc5281a", NA), c(2012, 1968, 1968, 1968)))))
+ok("empty in, empty out",
+   identical(aoi_rotation_default(character(0), integer(0)), integer(0)))
 
-ok("only film with an unrotated ring may carry a rotation",
-   identical(aoi_rotation_ok(med, terr, bear), c(TRUE, FALSE, FALSE, FALSE)))
-# The film arm is the one round 3 found: before it, a rotated film frame was
-# handed a value that disarmed fly's refusal.
-ok("a rotated film ring is refused a rotation",
-   identical(aoi_rotation_ok("Film - BW", "nominal_scale", 231.4), FALSE))
-ok("an unrotated film ring may carry one",
-   identical(aoi_rotation_ok("Film - BW", "nominal_scale", NA_real_), TRUE))
-ok("digital never carries one, rotated or not",
-   identical(aoi_rotation_ok(rep("Digital - Colour", 2), rep("gsd_scaled", 2),
-                             c(NA_real_, 47.2)), c(FALSE, FALSE)))
-ok("NA media is not film", identical(
-   aoi_rotation_ok(NA_character_, "nominal_scale", NA_real_), FALSE))
-ok("empty input gives empty logical",
-   identical(aoi_rotation_ok(character(0), character(0), numeric(0)),
-             logical(0)))
+# --- aoi_rotation_for() ---------------------------------------------------
+# Film gets the roll's measured value, else the series default; digital gets NA,
+# because a supplied rotation overrides the corner mapping fly measured.
+
+message("\n# aoi_rotation_for()\n")
+
+tab <- data.frame(film_roll = c("bc5282", "bc83062", "bc81050"),
+                  rotation = c(90L, 0L, 90L),   # deliberately unlike the series rule
+                  rotation_source = c("reviewed", "measured", "disputed"))
+
+r <- aoi_rotation_for(
+  media             = c("Film - BW", "Film - BW", "Film - Colour", "Digital - Colour", "Film - BW"),
+  footprint_terrain = c("dem_agl", "dem_agl", "dem_agl", "gsd_scaled", "dem_agl"),
+  film_roll         = c("bc5282", "bc83062", "bc7796", "bcd12008", "bc81050"),
+  photo_year        = c(1968, 1983, 1977, 2012, 1981),
+  table = tab)
+
+ok("the table beats the series rule",
+   identical(r$rotation[1:2], c(90L, 0L)))
+ok("  ... and carries the table's source",
+   identical(r$rotation_source[c(1, 2, 5)], c("reviewed", "measured", "disputed")))
+ok("an unmeasured film roll takes the series default",
+   identical(r$rotation[3], 90L) && identical(r$rotation_source[3], "assumed_by_series"))
+ok("digital gets no rotation and no source",
+   is.na(r$rotation[4]) && is.na(r$rotation_source[4]))
+ok("film on an unknown series is left NA, unsourced",
+   { u <- aoi_rotation_for("Film - BW", "dem_agl", "zz999", 1970, table = tab)
+     is.na(u$rotation) && is.na(u$rotation_source) })
+ok("NA media is not film",
+   is.na(aoi_rotation_for(NA_character_, "dem_agl", "bc5282", 1968, table = tab)$rotation))
 ok("anchored at the start of media",
-   identical(aoi_rotation_ok(c("Digital Film - X", "Film - BW"),
-                             c("gsd_scaled", "nominal_scale"),
-                             c(NA_real_, NA_real_)), c(FALSE, TRUE)))
+   is.na(aoi_rotation_for("Digital Film - X", "dem_agl", "bc5282", 1968, table = tab)$rotation))
+ok("empty input gives zero rows",
+   nrow(aoi_rotation_for(character(0), character(0), character(0), integer(0), table = tab)) == 0L)
 
-# NULL is a THIRD state, not a longer character(0): the column is absent. A
-# zero-length mask makes `x[!mask] <- NA` a silent no-op, so every frame would
-# keep a rotation and both failures above would be back with nothing reporting.
-for (args in list(list(NULL, "nominal_scale", NA_real_),
-                  list("Film - BW", "nominal_scale", NULL))) {
-  msg <- refusal(do.call(aoi_rotation_ok, args))
-  ok("refuses an absent media or bearing column", !is.na(msg))
+# The real table reads and uses the committed vocabulary.
+real_tab <- aoi_rotation_table()
+ok("the committed rotation table carries only known sources",
+   all(real_tab$rotation_source %in% c("measured", "reviewed", "disputed")))
+ok("  ... and only quarter turns",
+   all(real_tab$rotation %in% c(0L, 90L, 180L, 270L)))
+
+# NULL is a THIRD state: the column is absent. Without the guard every frame
+# would be classified digital and every film frame sent to fly's refusal.
+for (args in list(list(NULL, "dem_agl", "bc5282", 1968),
+                  list("Film - BW", "dem_agl", NULL, 1968))) {
+  msg <- refusal(do.call(aoi_rotation_for, c(args, list(table = tab))))
+  ok("refuses an absent media or film_roll column", !is.na(msg))
   ok("  ... names the remedy",
      !is.na(msg) && grepl("FORCE_REFRESH", msg, fixed = TRUE))
 }
 
-# An unrecognised terrain route must abort, not be classified. Keying on fly's
-# vocabulary without checking it is a guard that fails toward pass the day fly
-# renames a route or adds a second digital path.
-msg <- refusal(aoi_rotation_ok("Film - BW", "gsd_scaled_v2", NA_real_))
+# An unrecognised terrain route must abort, not be classified.
+msg <- refusal(aoi_rotation_for("Film - BW", "gsd_scaled_v2", "bc5282", 1968, table = tab))
 ok("refuses an unrecognised footprint_terrain", !is.na(msg))
 ok("  ... names the offending value",
    !is.na(msg) && grepl("gsd_scaled_v2", msg, fixed = TRUE))
-ok("  ... lists the vocabulary it knows",
-   !is.na(msg) && grepl("nominal_scale", msg, fixed = TRUE))
-# Re-typed independently, like `expected_cols` above. Built from
-# `aoi_terrain_values()` this was `setdiff(x, x)` — widening or narrowing the
-# vocabulary left the whole suite green, which is round 1's defect recurring one
-# function over. The DEM values matter most: `aoi_dem_enabled()` is FALSE, so
-# `dem_agl` and `no_dem_coverage` appear in no run and no other test, and the day
-# #23 flips it a wrong set aborts 01_fetch.R on every AOI.
-# Re-typed so a widening or narrowing of aoi_terrain_values() goes red. This is
-# a change-detector, NOT a validation: it is a second copy of a fly fact, and a
-# duplicate of a guess cannot check the guess. What validates the vocabulary is
-# the fly-side pin above, which reads each value out of fly_footprint()'s source.
+# Re-typed so a widening or narrowing of aoi_terrain_values() goes red. A
+# change-detector, not a validation: the fly-side pin above is what validates it.
 expected_terrain <- c("nominal_scale", "gsd_scaled", "dem_agl", "no_dem_coverage")
 ok("terrain vocabulary matches the declared contract",
    setequal(aoi_terrain_values(), expected_terrain))
 ok("every known value is accepted",
-   is.na(refusal(aoi_rotation_ok(rep("Digital - Colour", length(expected_terrain)),
-                                 expected_terrain,
-                                 rep(NA_real_, length(expected_terrain))))))
+   is.na(refusal(aoi_rotation_for(rep("Digital - Colour", 4), expected_terrain,
+                                  rep("bcd12008", 4), rep(2012, 4), table = tab))))
 ok("NA terrain is not unrecognised",
-   is.na(refusal(aoi_rotation_ok("Film - BW", NA_character_, NA_real_))))
+   is.na(refusal(aoi_rotation_for("Film - BW", NA_character_, "bc5282", 1968, table = tab))))
 
 # Film by the catalogue, digital route by fly: one of the two is wrong.
-msg <- refusal(aoi_rotation_ok(c("Film - BW", "Digital - Colour"),
-                               c("gsd_scaled", "gsd_scaled"),
-                               c(NA_real_, NA_real_)))
+msg <- refusal(aoi_rotation_for(c("Film - BW", "Digital - Colour"),
+                                c("gsd_scaled", "gsd_scaled"),
+                                c("bc5282", "bcd12008"), c(1968, 2012), table = tab))
 ok("refuses film sized by fly's digital route", !is.na(msg))
 ok("  ... counts only the clashing frame",
    !is.na(msg) && grepl("^1 frame", msg))
-ok("  ... says why it matters",
-   !is.na(msg) && grepl("quarter", msg, fixed = TRUE))
 
-# --- aoi_rotation() -------------------------------------------------------
-# Unchanged by this issue, pinned here because fly 0.9 moved the ground under it:
-# fly_bearing() now returns NA for a frame with no *adjacent* roll neighbour, and
-# the 8 km window is a spatial subset of every roll, so far more frames land on
-# the fixed-180 fallback than did before. Rotation is #23's to settle; these
-# assertions exist so a change to it is visible rather than inferred.
+# --- aoi_match_types() ---------------------------------------------------
+# A WFS batch typed on its own contents (an all-null column arrives character)
+# must be cast to the cache's types, and a cast that drops a value must abort.
 
-message("\n# aoi_rotation()\n")
+message("\n# aoi_match_types()\n")
 
-ok("NA bearing falls back to 180", identical(aoi_rotation(NA_real_), 180L))
-ok("returns integer", is.integer(aoi_rotation(c(0, 90, 180, 270))))
-ok("stays in [0, 360)", all(aoi_rotation(seq(0, 359, by = 7)) %in% seq(0, 270, 90)))
+ref <- data.frame(g = 2L, d = as.Date("2000-01-01"), s = "x", n = 1.5)
+got <- aoi_match_types(data.frame(g = NA_character_, d = "2001-02-03", s = 7L, n = "2.25"), ref)
+ok("an all-null character column becomes the reference integer",
+   is.integer(got$g) && is.na(got$g))
+ok("dates, characters and doubles follow the reference",
+   inherits(got$d, "Date") && is.character(got$s) && identical(got$n, 2.25))
+msg <- refusal(aoi_match_types(data.frame(g = c("3", "three")), ref))
+ok("a cast that would drop a value aborts", !is.na(msg))
+ok("  ... naming the column and the value",
+   !is.na(msg) && grepl("`g`", msg, fixed = TRUE) && grepl("three", msg, fixed = TRUE))
 
 # --- Result ---------------------------------------------------------------
 

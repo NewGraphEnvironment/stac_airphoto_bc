@@ -26,9 +26,12 @@ bash scripts/run_pipeline.sh se_a se_b
 # Or run individual steps from the project root
 Rscript scripts/01_fetch.R se_a
 Rscript scripts/02_georef.R se_a
-Rscript scripts/03_cog.R                    # global; also calls 03_cog_tag.py
+conda run -n stac-airphoto-bc python scripts/03_cog.py            # global
 conda run -n stac-airphoto-bc python scripts/05_stac_register.py
 Rscript scripts/04_s3_upload.R              # AFTER registration, not before
+
+# A full rebuild (#23): fail if any published item was not rebuilt locally
+conda run -n stac-airphoto-bc python scripts/05_stac_register.py --require-all-published --out /tmp/dry
 ```
 
 ## Areas of interest
@@ -52,14 +55,15 @@ To add an area, add an entry to `aoi_registry()`. Nothing else changes.
 | Step | Script | What it does |
 |------|--------|--------------|
 | 0 | `00_review_samples.R` | Grab a few thumbnails per year and inspect their properties (band count, dimensions, pixel values) — useful for understanding what the source data looks like before processing |
-| 1 | `01_fetch.R` | Query the BC Data Catalogue for air photo locations in the study area, then download the thumbnail images (6 downloads in parallel) |
-| 2 | `02_georef.R` | Position each thumbnail on the map by stretching it to match its estimated ground footprint (BC Albers projection, EPSG 3005) |
-| 3a | `03_cog.R` | Convert the georeferenced images into COGs — adding internal tiling and compression so they work efficiently over the web |
-| 3b | `03_cog_tag.py` | Stamp each COG with descriptive metadata (photo ID, date, scale, roll/frame) that shows up when you inspect the file in QGIS or any GDAL tool — called automatically by step 3a |
-| 4 | `04_s3_upload.R` | Sync COGs to the S3 bucket, uploading only new or changed files |
-| 5 | `05_stac_register.py` | Create a STAC catalog record for each image (location, date, properties, download link) and validate the whole collection |
+| 1 | `01_fetch.R` | Query the BC Data Catalogue for air photo locations in the study area, size each footprint with a DEM, give each frame its roll's scanning rotation and its measured placement shift, select every frame that reaches the AOI plus every frame already published, then download the thumbnails (6 in parallel) |
+| 2 | `02_georef.R` | Position each thumbnail on the map by stretching it to match its ground footprint (BC Albers, EPSG 3005). Hands `fly` the whole rolls, so each frame's flight bearing is the one the ledger records |
+| 3 | `03_cog.py` | Move each image by its placement shift, stamp it with descriptive and provenance metadata, and write it once as a COG. A file is replaced only when its bytes change |
+| 4 | `04_s3_upload.R` | Re-check every item against its COG (`stac_validate.py`), back up the published collection and item JSONs, then sync to S3 with SHA-256 checksums and spot-check what arrived |
+| 5 | `05_stac_register.py` | Create a STAC record for each image — location, date, properties, `file:checksum`, provenance — merge into the published collection, and validate |
+| — | `stac_validate.py` | The pre-sync checks: checksum and size against the file, COG layout, COG tags against item properties, the named provenance set, the closed vocabularies |
+| — | `../data-raw/tables_import-georef_validate.R` | Imports the measured per-roll rotation and per-frame placement tables from the private validation repo into `data-raw/rotation_roll.csv` and `data-raw/placement_frame.csv`, stamped with the source commit |
 | — | `airphoto_props.py` | Turns a catalogue row into `airphoto:` item properties and `metadata`-role assets. Imported by both step 5 and the backfill so the two cannot disagree; not run directly |
-| — | `../tests/` | Unit tests. `test_airphoto_props.py` covers the two coercions that fail silently (`Y`/`N` to boolean, and the `0` sentinel) — `conda run -n stac-airphoto-bc pytest tests/ -q`. `test_aoi.R` covers the guards in `aoi.R` that must fail toward abort — `Rscript tests/test_aoi.R`. Both from the repo root |
+| — | `../tests/` | Unit tests. `test_airphoto_props.py` covers the two coercions that fail silently (`Y`/`N` to boolean, and the `0` sentinel); `test_cog.py` the single-write COG stage (shift, alpha and nodata kept, layout, determinism) — `conda run -n stac-airphoto-bc pytest tests/ -q`. `test_aoi.R` covers the guards in `aoi.R` that must fail toward abort, and the rotation rule — `Rscript tests/test_aoi.R`. Both from the repo root |
 | — | `test_pipeline.R` | Run a 100-photo sample through the full pipeline to verify everything works after code changes |
 
 ## Backfilling items published before a metadata change
@@ -109,7 +113,7 @@ BC Data Catalogue (provincial web service)
 data/raw/thumbs/{year}/*.jpg
   ↓ 02_georef — position on map
 data/raw/georef/thumbs/{year}/*.tif
-  ↓ 03_cog + 03_cog_tag — convert to web-friendly format, embed metadata
+  ↓ 03_cog — shift by the measured placement, embed metadata, write once as COG
 data/stac/thumbs/{year}/*.tif
   ↓ 04_s3_upload — push to cloud storage
 s3://stac-airphoto-bc/thumbs/{year}/*
@@ -129,10 +133,9 @@ Every step checks for existing outputs and skips work that's already done. You c
 | Step | What gets skipped |
 |------|-------------------|
 | 01 | Catalogue query cached per AOI as `data/centroids/<id>.parquet` (set `FORCE_REFRESH = TRUE` to re-query); already-downloaded thumbnails are kept |
-| 02 | GeoTIFFs that already exist in the output directory |
-| 03a | COGs that already exist on disk |
-| 03b | COGs that already have metadata tags embedded |
-| 04 | Files already on S3 with matching size |
+| 02 | GeoTIFFs already on disk whose recorded inputs (rotation, bearing, footprint digest, fly build, pipeline commit, source JPG) are unchanged — `data/raw/georef/manifest.csv`; a changed input regenerates the file |
+| 03 | Nothing is skipped, but a COG is only replaced when its bytes change, so an unchanged one keeps its mtime |
+| 04 | Files already on S3 with the same size and a timestamp no older than the local file |
 | 05 | Rebuilds item records from local COGs, then merges them into the published collection — idempotent, and it never drops a published item link |
 
 ## What is per-AOI and what is shared
@@ -140,6 +143,8 @@ Every step checks for existing outputs and skips work that's already done. You c
 ```
 data/aoi/<id>.gpkg               per-AOI   the resolved AOI polygon
 data/centroids/<id>.parquet      per-AOI   cached catalogue query (8 km buffer)
+data/neighbours/<id>.parquet     per-AOI   every catalogue frame on the window's rolls (for +/-1 neighbours)
+data/window/<id>.parquet         per-AOI   the fetch window + roll neighbours, sized, with rotation, placement, provenance
 data/selected/<id>.parquet       per-AOI   frames chosen for this AOI
 data/select/<id>.csv             per-AOI   ledger: one row per candidate + reason
 data/reports/<id>.md             per-AOI   the report (committed)
@@ -162,7 +167,10 @@ and B.
 each with exactly one outcome, and the counts must reconcile to the window —
 that is what makes "what selection rejected and why" answerable rather than
 asserted. Reasons: `selected`, `no_footprint`, `footprint_misses_aoi`,
-`no_thumbnail_url`, `fetch_failed`, `georef_failed`. The declared column set is
+`no_bearing`, `no_thumbnail_url`, `fetch_failed`, `georef_failed`. A selected
+frame's `selection_basis` says why: `footprint` (it reaches the AOI) or
+`published` (it is already in the collection, and is rebuilt so no item keeps
+the old geometry). The declared column set is
 `aoi_ledger_cols()`, and `aoi_ledger_write()` refuses a ledger missing any of
 them — including one written before #20, which carries no terrain columns.
 

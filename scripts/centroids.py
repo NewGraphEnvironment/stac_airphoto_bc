@@ -54,3 +54,27 @@ def load_centroids(cache_dir: Path) -> dict:
 
     print(f"Loaded {n_rows} centroid rows from {len(paths)} AOI cache(s)")
     return merged
+
+
+def selected_ids(ledger_dir: Path) -> set:
+    """airp_ids a ledger currently selects, across every AOI, as strings.
+
+    A GeoTIFF or COG for any other frame is left from an earlier run —
+    deselected by a fly upgrade, a DEM or catalogue refresh, a new `no_bearing` —
+    and would otherwise ship stamped with the current run's provenance, because
+    its stem still has a window row (the window is every frame, not the selected
+    ones). 03_cog.py and 05_stac_register.py both refuse such a frame.
+    """
+    import csv
+
+    paths = sorted(Path(ledger_dir).glob("*.csv"))
+    if not paths:
+        raise FileNotFoundError(
+            f"No ledgers in {ledger_dir} — run 01_fetch.R and 02_georef.R first.")
+    ids = set()
+    for path in paths:
+        with path.open() as fh:
+            for row in csv.DictReader(fh):
+                if row["rejected_reason"] == "selected":
+                    ids.add(str(row["airp_id"]))
+    return ids

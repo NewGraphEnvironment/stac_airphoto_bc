@@ -40,12 +40,16 @@ from shapely.geometry import box, mapping
 sys.path.insert(0, str(Path(__file__).parent))
 from airphoto_props import (  # noqa: E402
     CATALOGUE_PROPERTY_FIELDS,
+    FILE_EXTENSION,
     METADATA_ASSET_FIELDS,
+    build_properties,
     catalogue_assets,
     catalogue_properties,
+    file_meta,
     georef_metadata,
 )
-from centroids import load_centroids  # noqa: E402
+from stac_validate import check_item  # noqa: E402
+from centroids import load_centroids, selected_ids  # noqa: E402
 
 # --- Config ---------------------------------------------------------------
 
@@ -67,7 +71,8 @@ S3_REGION = "us-west-2"
 COLLECTION_ID = "stac-airphoto-bc"
 STAC_DIR = Path("data/stac")
 CACHE_DIR = Path("data/centroids")
-SELECTED_DIR = Path("data/selected")
+WINDOW_DIR = Path("data/window")
+LEDGER_DIR = Path("data/select")
 
 S3_BASE = f"https://{BUCKET}.s3.{S3_REGION}.amazonaws.com"
 
@@ -117,27 +122,27 @@ def fetch_published_collection(url: str):
         ) from exc
 
 
-def load_footprint_basis(selected_dir: Path) -> dict:
-    """airp_id -> footprint_basis, for the frames this pipeline selected.
+def load_build_meta(window_dir: Path) -> dict:
+    """airp_id -> the window row 01_fetch.R wrote: footprint, rotation, placement
+    and run provenance, as `build_properties()` expects.
 
-    Stamped onto new items so a future DEM-corrected or digital-capable rebuild
-    is a queryable delta rather than archaeology. Existing published items carry
-    no basis: they predate the column.
+    Read from the windows rather than the selected sets because the window is
+    what 03_cog.py placed and tagged from, so the item and the raster it points
+    at are stamped from one source.
     """
     import pyarrow.parquet as pq
 
-    basis = {}
-    for path in sorted(selected_dir.glob("*.parquet")):
-        table = pq.read_table(path).to_pydict()
-        if "footprint_basis" not in table:
-            continue
-        for aid, b in zip(table["airp_id"], table["footprint_basis"]):
-            if b is not None:
-                basis[aid] = b
-    return basis
+    meta = {}
+    for path in sorted(window_dir.glob("*.parquet")):
+        table = pq.read_table(path).to_pylist()
+        for row in table:
+            if row.get("in_window") is False:
+                continue  # a roll neighbour, sized only for its neighbours' bearings
+            meta.setdefault(row["airp_id"], row)
+    return meta
 
 
-def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
+def build_items(centroids: dict, build_by_id: dict, stac_dir: Path) -> list:
     """One STAC item per thumbnail COG on disk."""
     meta_by_id = {}
     url_to_id = {}
@@ -159,6 +164,9 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
     items = []
     unmatched = 0
     unrecognised_georef = []
+    missing_build = []
+    not_selected = []
+    selected = selected_ids(LEDGER_DIR)
 
     for cog_path in thumb_cogs:
         stem = cog_path.stem
@@ -196,6 +204,9 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
                 href=s3_href(rel),
                 media_type=pystac.MediaType.COG,
                 roles=["data", "thumbnail"],
+                # Hashed here, after 03_cog.py's single write, so the checksum
+                # describes the object the sync will upload (#30).
+                extra_fields=file_meta(cog_path),
             )
         }
         scan_match = list(stac_dir.glob(
@@ -231,8 +242,23 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
             unrecognised_georef.append(
                 (airp_id, meta.get("georef_metadata_ind")))
 
-        if airp_id in basis_by_id:
-            properties["airphoto:footprint_basis"] = basis_by_id[airp_id]
+        if str(airp_id) not in selected:
+            # A COG for a frame no ledger selects is left from an earlier run; its
+            # window row would stamp it with this run's provenance regardless.
+            not_selected.append(airp_id)
+            continue
+        build = build_by_id.get(airp_id)
+        if build is None:
+            # A COG with no window row was not placed or tagged by this pipeline's
+            # current stages; publishing it would ship an item with no provenance.
+            missing_build.append(airp_id)
+            continue
+        properties.update(build_properties(build))
+        # When the raster was produced: the COG's mtime, which 03_cog.py only moves
+        # when the bytes change. Not "now" — that would rewrite every item JSON on
+        # every run and date an unchanged raster to the day it was re-registered.
+        properties["nge:produced_datetime"] = datetime.fromtimestamp(
+            cog_path.stat().st_mtime, tz=timezone.utc).isoformat()
 
         roll = meta.get("film_roll", "")
         frame = meta.get("frame_number", "")
@@ -250,6 +276,7 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
             assets=assets,
             stac_extensions=[
                 "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+                FILE_EXTENSION,
             ],
         )
         item.collection_id = COLLECTION_ID
@@ -260,6 +287,12 @@ def build_items(centroids: dict, basis_by_id: dict, stac_dir: Path) -> list:
         ))
         items.append(item)
 
+    if not_selected:
+        raise SystemExit(f"{len(not_selected)} COG(s) are for frames no ledger selects, e.g. "
+                         f"{not_selected[:5]} — left from an earlier run; remove them.")
+    if missing_build:
+        raise SystemExit(f"{len(missing_build)} COG(s) have no window row, e.g. "
+                         f"{missing_build[:5]} — re-run 01_fetch.R for their AOI.")
     if unmatched:
         print(f"  WARN: {unmatched} COGs had no metadata match and were skipped")
     if unrecognised_georef:
@@ -288,14 +321,17 @@ def main() -> int:
                     help="output directory (default data/stac)")
     ap.add_argument("--no-merge", action="store_true",
                     help="rebuild from local COGs only; discards published links")
+    ap.add_argument("--require-all-published", action="store_true",
+                    help="a full rebuild (#23): fail unless every published item was "
+                         "rebuilt locally, so none keeps its old item by default")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     centroids = load_centroids(CACHE_DIR)
-    basis_by_id = load_footprint_basis(SELECTED_DIR)
-    items = build_items(centroids, basis_by_id, STAC_DIR)
+    build_by_id = load_build_meta(WINDOW_DIR)
+    items = build_items(centroids, build_by_id, STAC_DIR)
     print(f"Generated {len(items)} STAC items from local COGs")
 
     if not items:
@@ -467,6 +503,26 @@ def main() -> int:
     errors = sum(1 for item in items if not _valid(item))
     if not _valid(collection):
         errors += 1
+    # The #30 checks — checksum against the bytes on disk, the named provenance
+    # set, the closed vocabularies, COG layout — on every item about to be
+    # written. stac_validate.py runs the same function again before the sync.
+    for item in items:
+        for problem in check_item(item.to_dict(), STAC_DIR):
+            print(f"  FAIL: {item.id} — {problem}")
+            errors += 1
+
+    # Published items this run did not rebuild keep their old item JSON on S3.
+    # Counted, so a rebuild that silently misses part of the collection is seen.
+    if published:
+        stale = sorted({link_id(h) for h in old_links} - {i.id for i in items})
+        print(f"Published items not rebuilt by this run: {len(stale)}")
+        if args.require_all_published and stale:
+            # The merge would keep their old links, so the old item and COG would
+            # stay live beside the rebuild with nothing saying so.
+            stale_path = out_dir / "not_rebuilt.txt"
+            stale_path.write_text("\n".join(stale) + "\n")
+            failures.append(f"{len(stale)} published item(s) were not rebuilt "
+                            f"(listed in {stale_path})")
 
     if failures:
         for f in failures:

@@ -1,5 +1,5 @@
 #!/bin/bash
-# run_pipeline.sh — end-to-end: fetch → georef → COG → tag → STAC → S3
+# run_pipeline.sh — end-to-end: fetch → georef → place + tag + COG → STAC → S3
 #
 # Usage:
 #   bash scripts/run_pipeline.sh                 # every registered AOI
@@ -49,7 +49,7 @@ run_r scripts/02_georef.R
 
 echo ""
 echo "=== 03: COG ==="
-Rscript scripts/03_cog.R
+conda run --no-capture-output -n stac-airphoto-bc python scripts/03_cog.py
 
 echo ""
 echo "=== 04: STAC REGISTER ==="
