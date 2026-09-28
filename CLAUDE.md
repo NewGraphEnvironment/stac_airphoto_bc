@@ -256,7 +256,6 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
   `collection.json`, and aborts after the delete if any item fetch fails, leaving
   the collection empty. Register with the `stac_dem_bc` upsert scripts instead
   (Pipeline, above).
-- The ledger's `aoi_id` holds WFS feature ids, not the AOI id (#32).
 
 <!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 

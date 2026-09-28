@@ -290,6 +290,15 @@ if (length(absent)) message("      absent: ", paste(absent, collapse = ", "))
 ok("... and declares rejected_reason",
    grepl("rejected_reason\\s*=", block))
 
+# #32. The window carries the catalogue's own `id` column, so a bare
+# `aoi_id = id` inside transmute() resolves to the WFS feature id, not the loop
+# variable. Only an injected value names the AOI. `outputs` is comment-free, so
+# a bare assignment kept in a comment does not satisfy either line.
+ok("the transmute assigns aoi_id from an injected id (#32)",
+   grepl("aoi_id\\s*=\\s*(!!\\s*id|\\.env\\$id)\\b", outputs, perl = TRUE))
+ok("  ... and never from a bare, data-masked `id`",
+   !grepl("aoi_id\\s*=\\s*id\\b", outputs, perl = TRUE))
+
 # --- The guard is actually wired in ---------------------------------------
 # A guard nothing calls is decoration, and no unit test of the function itself
 # can see it being dropped from a stage.
@@ -402,6 +411,92 @@ wide <- full
 wide$width_source <- logical(0)
 ok("tolerates an extra column",
    is.na(refusal(aoi_ledger_check_cols(wide, "se_a"))))
+
+# --- aoi_ledger_check_id() ------------------------------------------------
+# #32. The parse check above catches one spelling; this catches the class, in
+# every stage that writes or reads a ledger. Fixtures carry rows, because every
+# column check passes vacuously on the zero-row `full` above.
+
+message("\n# aoi_ledger_check_id()\n")
+
+wfs <- "WHSE_IMAGERY_AND_BASE_MAPS.AIMG_PHOTO_CENTROIDS_SP.1174688"
+
+ok("accepts a ledger whose aoi_id is the AOI",
+   is.na(refusal(aoi_ledger_check_id(
+     data.frame(aoi_id = c("se_c", "se_c"), airp_id = 1:2), "se_c"))))
+ok("accepts a zero-row ledger",
+   is.na(refusal(aoi_ledger_check_id(
+     data.frame(aoi_id = character(0)), "se_c"))))
+
+msg <- refusal(aoi_ledger_check_id(
+  data.frame(aoi_id = c(wfs, wfs), airp_id = 1:2), "se_c"))
+ok("refuses WFS feature ids (the #32 ledger)", !is.na(msg))
+ok("  ... names the AOI",
+   !is.na(msg) && grepl("'se_c'", msg, fixed = TRUE))
+ok("  ... names an offending value",
+   !is.na(msg) && grepl(wfs, msg, fixed = TRUE))
+ok("  ... names the remedy",
+   !is.na(msg) && grepl("01_fetch.R", msg, fixed = TRUE))
+
+ok("refuses a ledger mixing the AOI with another",
+   !is.na(refusal(aoi_ledger_check_id(
+     data.frame(aoi_id = c("se_c", "se_b"), airp_id = 1:2), "se_c"))))
+ok("refuses an NA aoi_id",
+   !is.na(refusal(aoi_ledger_check_id(
+     data.frame(aoi_id = c("se_c", NA), airp_id = 1:2), "se_c"))))
+# A missing column must not read as "no offending values".
+ok("refuses a ledger with no aoi_id column",
+   !is.na(refusal(aoi_ledger_check_id(data.frame(airp_id = 1:2), "se_c"))))
+
+# Wired in, asked of the parse tree as for aoi_require_fly() above: the writer
+# every stage goes through, and 02_georef.R's read, which must abort before any
+# GeoTIFF is written rather than at the write after them.
+#
+# The writer must CALL it (a bare symbol reference is not a call) in a statement
+# before the one that writes, or a mis-keyed ledger overwrites the good one on
+# disk and is refused only afterwards. Both anchors must be found, as below.
+calls_in <- function(e) {
+  if (!is.call(e)) return(character(0))
+  f <- e[[1]]
+  nm <- if (is.name(f)) {
+    as.character(f)
+  } else if (is.call(f) && identical(f[[1]], as.name("::"))) {
+    as.character(f[[3]])
+  } else {
+    character(0)
+  }
+  c(nm, unlist(lapply(as.list(e)[-1], calls_in)))
+}
+ok("aoi_ledger_write() calls aoi_ledger_check_id() before writing",
+   tryCatch({
+     stmts <- as.list(body(aoi_ledger_write))[-1]
+     first <- function(fn) {
+       min(which(vapply(stmts, function(st) fn %in% calls_in(st), logical(1))),
+           Inf)
+     }
+     at <- first("aoi_ledger_check_id")
+     wr <- first("write_csv")
+     is.finite(at) && is.finite(wr) && at < wr
+   }, error = function(e) FALSE))
+# "On the read" means before any work: the check CALL must come after the
+# ledger's read_csv() and before every call that touches files -- the per-year
+# map_dfr() and, inside it, fly_footprint(), the stale-GeoTIFF unlink() and
+# fly_georef(). Parse data, not text: a mention in a comment or a string is not
+# a call token. Every anchor must be FOUND. An absent one is Inf, and a
+# comparison against Inf passes any placement -- round 2 of the review showed
+# fly_georef() passed as a value (do.call, purrr::map) does exactly that.
+call_line <- function(pd, fn) {
+  min(pd$line1[pd$token == "SYMBOL_FUNCTION_CALL" & pd$text == fn], Inf)
+}
+ok("02_georef.R calls aoi_ledger_check_id() on the read",
+   tryCatch({
+     pd <- utils::getParseData(parse("scripts/02_georef.R", keep.source = TRUE))
+     at <- call_line(pd, "aoi_ledger_check_id")
+     read <- call_line(pd, "read_csv")
+     work <- vapply(c("map_dfr", "fly_footprint", "unlink", "fly_georef"),
+                    function(fn) call_line(pd, fn), numeric(1))
+     all(is.finite(c(at, read, work))) && read < at && at < min(work)
+   }, error = function(e) FALSE))
 
 # --- aoi_rotation_default() -----------------------------------------------
 # The series rule for rolls nobody measured (#23). Re-typed from the #23 body and

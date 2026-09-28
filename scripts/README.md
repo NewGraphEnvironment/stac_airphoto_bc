@@ -172,7 +172,9 @@ frame's `selection_basis` says why: `footprint` (it reaches the AOI) or
 `published` (it is already in the collection, and is rebuilt so no item keeps
 the old geometry). The declared column set is
 `aoi_ledger_cols()`, and `aoi_ledger_write()` refuses a ledger missing any of
-them — including one written before #20, which carries no terrain columns.
+them — including one written before #20, which carries no terrain columns. It
+also refuses one whose `aoi_id` is not the AOI (`aoi_ledger_check_id()`): before
+#32 every ledger held the catalogue's WFS feature ids there.
 
 `no_footprint` replaced `digital_unknown_format` in #20, and the rename is not
 cosmetic. The old reason keyed on `footprint_basis == "unknown_format"`, a

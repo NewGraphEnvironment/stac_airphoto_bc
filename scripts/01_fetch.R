@@ -205,7 +205,9 @@ for (id in ids) {
   ledger <- window[window$in_window, ] |>
     sf::st_drop_geometry() |>
     dplyr::transmute(
-      aoi_id = id,
+      # Injected: the window carries the catalogue's own `id` column, which a
+      # bare `id` resolves to under data masking (#32).
+      aoi_id = !!id,
       airp_id, film_roll, frame_number,
       photo_year = year, era, footprint_basis,
       footprint_terrain, width_source, footprint_bearing,

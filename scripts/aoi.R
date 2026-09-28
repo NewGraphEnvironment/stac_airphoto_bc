@@ -786,6 +786,30 @@ aoi_ledger_check_cols <- function(ledger, id) {
   invisible(ledger)
 }
 
+#' Refuse a ledger whose `aoi_id` is not the AOI it is written for
+#'
+#' #32: `01_fetch.R` wrote `aoi_id = id` inside a `transmute()` over a frame
+#' carrying the catalogue's own `id` column, so every ledger held WFS feature ids
+#' and nothing noticed, because nothing groups on the column yet. A missing
+#' column is refused too, rather than read as "no offending values".
+aoi_ledger_check_id <- function(ledger, id) {
+  if (!"aoi_id" %in% names(ledger)) {
+    stop("Ledger for '", id, "' has no aoi_id column.", call. = FALSE)
+  }
+  vals <- ledger[["aoi_id"]]
+  bad <- unique(vals[is.na(vals) | vals != id])
+  if (length(bad)) {
+    stop(
+      "Ledger for '", id, "' carries ", length(bad), " aoi_id value(s) other ",
+      "than '", id, "', e.g. ", paste(utils::head(bad, 3), collapse = ", "), ".\n",
+      "A ledger written before #32 holds WFS feature ids there. ",
+      "Re-run 01_fetch.R ", id, " to rebuild it.",
+      call. = FALSE
+    )
+  }
+  invisible(ledger)
+}
+
 #' Write the ledger, asserting it accounts for every candidate
 #'
 #' The count is read back from the centroid cache on disk rather than passed in.
@@ -821,6 +845,7 @@ aoi_ledger_write <- function(ledger, id) {
   }
 
   aoi_ledger_check_cols(ledger, id)
+  aoi_ledger_check_id(ledger, id)
 
   unknown <- setdiff(unique(ledger$rejected_reason), aoi_reasons())
   if (length(unknown)) {
