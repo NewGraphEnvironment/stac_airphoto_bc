@@ -27,4 +27,4 @@ ids. The routine is `--all` (user's choice); `--drift` is a gap-filler.
 - [x] Tests pass (Python 49/49; no R touched, `tests/test_aoi.R` not run)
 - [x] `/code-check` clean on each commit
 - [x] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] `/planning-archive` on completion
