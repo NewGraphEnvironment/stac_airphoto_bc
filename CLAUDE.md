@@ -492,6 +492,9 @@ Sum a range directly (segment tree, per-range `sum()`, or grouped sums) rather t
 ### A `pkg::` call in a test passes `devtools::test()` and fails `R CMD check` if `pkg` is undeclared
 `R CMD check` warns "'::' or ':::' import not declared from" for any package a test reaches with `::` that `DESCRIPTION` does not list, and under `error-on: "warning"` that reddens every runner.
 
+### Inside a dplyr verb, a column named like a local variable wins
+Inject a local value into a data-masked verb with `!!x` or `.env$x`, never a bare `x`: `transmute(d, aoi_id = id)` inside `for (id in ids)` reads the frame's own `id` column whenever one exists, with no warning, and the result is well-typed and plausible.
+
 # Code Check — Shell
 Tool-level traps in bash, sed, git and `gh`, and in the host toolchain those commands depend on.
 
