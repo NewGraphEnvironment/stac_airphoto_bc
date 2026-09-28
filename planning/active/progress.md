@@ -13,3 +13,7 @@
   check, exported vars leaking into the DEM shell; R3 the replacement spot-check passed on
   null==null and sampled a fixed item, trailing comments broke a zsh paste. Spot-check
   removed; content gap filed upstream as stac_dem_bc#45; misleading error as stac_dem_bc#44
+- Phase 2: audit-items OK on 10,100 (dem negative control fails all); live --verify IN SYNC
+  10100/10100; documented block run verbatim under bash and zsh (nointeractivecomments) in
+  pass (dryrun) and fail (nonexistent bucket, rc 22, verify skipped) states; PYTHON= path vs
+  directory confirmed; #33 body retitled/rewritten for `--all`

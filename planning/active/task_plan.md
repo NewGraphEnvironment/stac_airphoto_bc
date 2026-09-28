@@ -17,14 +17,14 @@ ids. The routine is `--all` (user's choice); `--drift` is a gap-filler.
 - [x] Grep `pypgstac|GEOPRO_IP|item_register|collection_register|stac_dem_bc#42` — only the CLAUDE.md warning and `planning/archive/` remain
 
 ## Phase 2: Verify
-- [ ] `bash -n` on both edited shell scripts
-- [ ] From `stac_dem_bc`: `register_manifest.py audit-items` over the 10,100 local items with `--require-asset thumbnail --expect 10100` passes
-- [ ] From `stac_dem_bc`: live `catalogue_register.sh --verify` with the documented env (read-only); record output in `findings.md`
-- [ ] Edit the #33 issue body to prescribe `--all`, with the reason
+- [x] `bash -n` on both edited shell scripts
+- [x] From `stac_dem_bc`: `register_manifest.py audit-items` over the 10,100 local items with `--require-asset thumbnail --expect 10100` passes
+- [x] From `stac_dem_bc`: live `catalogue_register.sh --verify` with the documented env (read-only); record output in `findings.md`
+- [x] Edit the #33 issue body to prescribe `--all`, with the reason
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
+- [x] Tests pass (Python 49/49; no R touched, `tests/test_aoi.R` not run)
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
 - [ ] `/planning-archive` on completion

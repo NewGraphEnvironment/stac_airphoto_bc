@@ -63,3 +63,5 @@ Measured before the merge (read-only, `audit-items` over `data/stac/`): 10,100 i
 
 | Error | Resolution |
 |-------|------------|
+| `diff` in this shell is a `git diff --no-index` wrapper; `diff -q` → `unknown switch 'q'` | Compared with `jq -n --slurpfile … '=='` instead (code-check-shell "verification command can be shadowed") |
+| Unquoted heredoc building the issue body ran `` `--all` `` as a command; sentence lost a word | Patched the file and re-edited the issue; quote heredocs that carry markdown |
