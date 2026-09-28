@@ -27,3 +27,5 @@ Distinct `aoi_id` values per on-disk ledger, all `WHSE_IMAGERY_AND_BASE_MAPS.AIM
 
 | Error | Resolution |
 |-------|------------|
+| Stray `git checkout -- .` reverted uncommitted Phase 2 edits | Recovered from the mutation copy; commit before any mutation run |
+| Mutation baseline exited 1 | Copy lacked `data-raw/` (`aoi_rotation_table()` reads it); symlink it too |

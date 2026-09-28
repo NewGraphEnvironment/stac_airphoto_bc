@@ -448,6 +448,56 @@ ok("refuses an NA aoi_id",
 ok("refuses a ledger with no aoi_id column",
    !is.na(refusal(aoi_ledger_check_id(data.frame(airp_id = 1:2), "se_c"))))
 
+# Wired in, asked of the parse tree as for aoi_require_fly() above: the writer
+# every stage goes through, and 02_georef.R's read, which must abort before any
+# GeoTIFF is written rather than at the write after them.
+#
+# The writer must CALL it (a bare symbol reference is not a call) in a statement
+# before the one that writes, or a mis-keyed ledger overwrites the good one on
+# disk and is refused only afterwards. Both anchors must be found, as below.
+calls_in <- function(e) {
+  if (!is.call(e)) return(character(0))
+  f <- e[[1]]
+  nm <- if (is.name(f)) {
+    as.character(f)
+  } else if (is.call(f) && identical(f[[1]], as.name("::"))) {
+    as.character(f[[3]])
+  } else {
+    character(0)
+  }
+  c(nm, unlist(lapply(as.list(e)[-1], calls_in)))
+}
+ok("aoi_ledger_write() calls aoi_ledger_check_id() before writing",
+   tryCatch({
+     stmts <- as.list(body(aoi_ledger_write))[-1]
+     first <- function(fn) {
+       min(which(vapply(stmts, function(st) fn %in% calls_in(st), logical(1))),
+           Inf)
+     }
+     at <- first("aoi_ledger_check_id")
+     wr <- first("write_csv")
+     is.finite(at) && is.finite(wr) && at < wr
+   }, error = function(e) FALSE))
+# "On the read" means before any work: the check CALL must come after the
+# ledger's read_csv() and before every call that touches files -- the per-year
+# map_dfr() and, inside it, fly_footprint(), the stale-GeoTIFF unlink() and
+# fly_georef(). Parse data, not text: a mention in a comment or a string is not
+# a call token. Every anchor must be FOUND. An absent one is Inf, and a
+# comparison against Inf passes any placement -- round 2 of the review showed
+# fly_georef() passed as a value (do.call, purrr::map) does exactly that.
+call_line <- function(pd, fn) {
+  min(pd$line1[pd$token == "SYMBOL_FUNCTION_CALL" & pd$text == fn], Inf)
+}
+ok("02_georef.R calls aoi_ledger_check_id() on the read",
+   tryCatch({
+     pd <- utils::getParseData(parse("scripts/02_georef.R", keep.source = TRUE))
+     at <- call_line(pd, "aoi_ledger_check_id")
+     read <- call_line(pd, "read_csv")
+     work <- vapply(c("map_dfr", "fly_footprint", "unlink", "fly_georef"),
+                    function(fn) call_line(pd, fn), numeric(1))
+     all(is.finite(c(at, read, work))) && read < at && at < min(work)
+   }, error = function(e) FALSE))
+
 # --- aoi_rotation_default() -----------------------------------------------
 # The series rule for rolls nobody measured (#23). Re-typed from the #23 body and
 # research section 14, not derived from the function: a boundary moved by a year

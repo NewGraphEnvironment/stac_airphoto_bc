@@ -14,12 +14,12 @@
 - [x] Run `Rscript tests/test_aoi.R` — the new assertions fail (function absent, bare `id`)
 
 ## Phase 2: Fix
-- [ ] `scripts/01_fetch.R:208` → `aoi_id = !!id`, with a one-line comment on why
-- [ ] `scripts/aoi.R`: add `aoi_ledger_check_id(ledger, id)` beside
+- [x] `scripts/01_fetch.R:208` → `aoi_id = !!id`, with a one-line comment on why
+- [x] `scripts/aoi.R`: add `aoi_ledger_check_id(ledger, id)` beside
       `aoi_ledger_check_cols()`; call it from `aoi_ledger_write()` (covers 01 and 02's write)
-- [ ] `scripts/02_georef.R:70`: call it on the read path next to `aoi_ledger_check_cols()`,
+- [x] `scripts/02_georef.R:70`: call it on the read path next to `aoi_ledger_check_cols()`,
       so a stale ledger aborts before any GeoTIFF is written (same reason as that comment)
-- [ ] `Rscript tests/test_aoi.R` green; mutation: revert to `aoi_id = id` and drop the
+- [x] `Rscript tests/test_aoi.R` green; mutation: revert to `aoi_id = id` and drop the
       writer call, confirm each goes red, restore (work on a copy, `cmp` after)
 
 ## Phase 3: Repair the written ledgers and docs

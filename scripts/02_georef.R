@@ -66,8 +66,12 @@ for (id in ids) {
   # refusal tells the operator to re-run 01_fetch.R, and it used to arrive after
   # fly_georef() had already written every GeoTIFF for the AOI.
 
-  ledger <- readr::read_csv(aoi_path("ledger", id), show_col_types = FALSE)
+  # aoi_id as character: an AOI id that looks numeric would otherwise be guessed
+  # as a double, fail aoi_ledger_check_id(), and be written back reformatted.
+  ledger <- readr::read_csv(aoi_path("ledger", id), show_col_types = FALSE,
+                            col_types = readr::cols(aoi_id = "c"))
   aoi_ledger_check_cols(ledger, id)
+  aoi_ledger_check_id(ledger, id)
 
   # Built at fetch time, read here. Resolving the AOI polygon to build one would
   # open a `fresh` database connection for a watershed AOI, which this stage has

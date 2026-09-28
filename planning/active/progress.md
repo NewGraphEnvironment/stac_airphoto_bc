@@ -10,3 +10,28 @@
   parse pair on the bare `aoi_id = id`; `aoi_ledger_check_id()` absent). The mix / NA /
   missing-column refusals pass vacuously until the function exists — the Phase 2
   mutation run is what proves them.
+- Phase 2: `aoi_id = !!id`; `aoi_ledger_check_id()` called from `aoi_ledger_write()` and
+  02_georef.R's read; wiring asserted from the parse tree. Probe: `transmute(d, id)` over a
+  frame with an `id` column gives the feature id, `!!id` the loop value.
+  Mutation table (copy of scripts/, tests/, data-raw symlinked; tree `shasum`-checked after):
+  bare `id` red · `.env$id` green (accepted spelling) · missing-column guard removed red ·
+  stop removed red · writer call dropped red · 02 read call dropped red · remedy dropped
+  red · value dropped red · `is.na()` dropped **green** — equivalent mutant, `vals[NA]` is
+  NA so an NA is refused either way; kept for readability.
+- Mistake: a stray `git checkout -- .` in the mutation command reverted the uncommitted
+  Phase 2 edits. Recovered the test from the mutation copy and re-applied the script edits
+  verbatim; suite green after.
+- Plan review (background, Plan agent): wiring gap (already closed), numeric-looking AOI
+  id would be guessed as double on 02's read → `col_types = cols(aoi_id = "c")`,
+  `scripts/README.md` lists the writer's checks → updated. Repair via `readLines`/`sub`.
+- /code-check, three rounds (review-round{1,2,3}.md):
+  1. Clean; noted "on the read" test only checked presence.
+  2. Two defects inside that fix: absent `fly_georef` anchor → `Inf` passes any placement;
+     anchoring on `fly_georef` alone lets the check move after `unlink()` of stale
+     GeoTIFFs. Fixed: all anchors finite, check between `read_csv` and
+     `map_dfr`/`fly_footprint`/`unlink`/`fly_georef`.
+  3. Mechanism: "a locator is present, and a name's presence is its call's position".
+     Enumerated every #32 assertion; one more instance — the writer test accepted the call
+     after `write_csv()` or a bare symbol. Fixed with a statement-order check on real calls.
+     Mutations (call after write, bare symbol, dropped, write anchor absent) all red.
+  Ended by enumeration.
