@@ -5,13 +5,13 @@
 `scripts/01_fetch.R` builds the ledger with `dplyr::transmute(aoi_id = id, ...)`. The centroid cache carries the catalogue's own `id` column (`WHSE_IMAGERY_AND_BASE_MAPS.AIMG_PHOTO_CENTROIDS_SP.<n>`), and dplyr's data masking resolves `id` to that column before the loop variable. Measured 2026-09-27: `unique(read_csv("data/select/se_c.csv")$aoi_id)` returns feature ids, not `"se_c"`. Present at 9818d6f, so it predates #23.
 
 ## Phase 1: Tests first (red)
-- [ ] `tests/test_aoi.R`, in the existing transmute-block section: assert `outputs`
+- [x] `tests/test_aoi.R`, in the existing transmute-block section: assert `outputs`
       assigns `aoi_id` from an injected value (`aoi_id = !!id` or `.env$id`), and that a
       bare `aoi_id = id` is absent
-- [ ] New `aoi_ledger_check_id()` section, both answers on fixtures with rows: accepts a
+- [x] New `aoi_ledger_check_id()` section, both answers on fixtures with rows: accepts a
       ledger whose `aoi_id` is all `id`; refuses feature ids, a mix, and `NA`; refusal
       names the AOI, an offending value, and the remedy (`01_fetch.R`); zero-row ledger passes
-- [ ] Run `Rscript tests/test_aoi.R` — the new assertions fail (function absent, bare `id`)
+- [x] Run `Rscript tests/test_aoi.R` — the new assertions fail (function absent, bare `id`)
 
 ## Phase 2: Fix
 - [ ] `scripts/01_fetch.R:208` → `aoi_id = !!id`, with a one-line comment on why

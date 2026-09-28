@@ -290,6 +290,15 @@ if (length(absent)) message("      absent: ", paste(absent, collapse = ", "))
 ok("... and declares rejected_reason",
    grepl("rejected_reason\\s*=", block))
 
+# #32. The window carries the catalogue's own `id` column, so a bare
+# `aoi_id = id` inside transmute() resolves to the WFS feature id, not the loop
+# variable. Only an injected value names the AOI. `outputs` is comment-free, so
+# a bare assignment kept in a comment does not satisfy either line.
+ok("the transmute assigns aoi_id from an injected id (#32)",
+   grepl("aoi_id\\s*=\\s*(!!\\s*id|\\.env\\$id)\\b", outputs, perl = TRUE))
+ok("  ... and never from a bare, data-masked `id`",
+   !grepl("aoi_id\\s*=\\s*id\\b", outputs, perl = TRUE))
+
 # --- The guard is actually wired in ---------------------------------------
 # A guard nothing calls is decoration, and no unit test of the function itself
 # can see it being dropped from a stage.
@@ -402,6 +411,42 @@ wide <- full
 wide$width_source <- logical(0)
 ok("tolerates an extra column",
    is.na(refusal(aoi_ledger_check_cols(wide, "se_a"))))
+
+# --- aoi_ledger_check_id() ------------------------------------------------
+# #32. The parse check above catches one spelling; this catches the class, in
+# every stage that writes or reads a ledger. Fixtures carry rows, because every
+# column check passes vacuously on the zero-row `full` above.
+
+message("\n# aoi_ledger_check_id()\n")
+
+wfs <- "WHSE_IMAGERY_AND_BASE_MAPS.AIMG_PHOTO_CENTROIDS_SP.1174688"
+
+ok("accepts a ledger whose aoi_id is the AOI",
+   is.na(refusal(aoi_ledger_check_id(
+     data.frame(aoi_id = c("se_c", "se_c"), airp_id = 1:2), "se_c"))))
+ok("accepts a zero-row ledger",
+   is.na(refusal(aoi_ledger_check_id(
+     data.frame(aoi_id = character(0)), "se_c"))))
+
+msg <- refusal(aoi_ledger_check_id(
+  data.frame(aoi_id = c(wfs, wfs), airp_id = 1:2), "se_c"))
+ok("refuses WFS feature ids (the #32 ledger)", !is.na(msg))
+ok("  ... names the AOI",
+   !is.na(msg) && grepl("'se_c'", msg, fixed = TRUE))
+ok("  ... names an offending value",
+   !is.na(msg) && grepl(wfs, msg, fixed = TRUE))
+ok("  ... names the remedy",
+   !is.na(msg) && grepl("01_fetch.R", msg, fixed = TRUE))
+
+ok("refuses a ledger mixing the AOI with another",
+   !is.na(refusal(aoi_ledger_check_id(
+     data.frame(aoi_id = c("se_c", "se_b"), airp_id = 1:2), "se_c"))))
+ok("refuses an NA aoi_id",
+   !is.na(refusal(aoi_ledger_check_id(
+     data.frame(aoi_id = c("se_c", NA), airp_id = 1:2), "se_c"))))
+# A missing column must not read as "no offending values".
+ok("refuses a ledger with no aoi_id column",
+   !is.na(refusal(aoi_ledger_check_id(data.frame(airp_id = 1:2), "se_c"))))
 
 # --- aoi_rotation_default() -----------------------------------------------
 # The series rule for rolls nobody measured (#23). Re-typed from the #23 body and
