@@ -35,3 +35,12 @@
      after `write_csv()` or a bare symbol. Fixed with a statement-order check on real calls.
      Mutations (call after write, bare symbol, dropped, write anchor absent) all red.
   Ended by enumeration.
+- Phase 3: repaired the four gitignored ledgers in place (backups in the session
+  scratchpad first):
+  `x <- readLines(f); x[-1] <- sub("^[^,]*", id, x[-1]); writeLines(x, f)`, after asserting
+  the header starts `aoi_id,` and no field is quoted. Verified per file: row count, header,
+  and `cut -d, -f2-` byte-identical; `aoi_id` now the one AOI id (neexdzii_kwa 14,858,
+  se_a 818, se_b 840, se_c 1,013 rows). The guard, read as 02 reads, accepts all four and
+  refuses the pre-repair se_c backup with the intended message. `data/reports/` unchanged.
+  Any other machine holding pre-#32 `data/select/` needs the same one-liner or a 01 re-run.
+- CLAUDE.md: dropped the #32 Known issues line (above the soul marker).

@@ -23,17 +23,17 @@
       writer call, confirm each goes red, restore (work on a copy, `cmp` after)
 
 ## Phase 3: Repair the written ledgers and docs
-- [ ] Rewrite `aoi_id` in `data/select/{neexdzii_kwa,se_a,se_b,se_c}.csv` in place: read
+- [x] Rewrite `aoi_id` in `data/select/{neexdzii_kwa,se_a,se_b,se_c}.csv` in place: read
       all-character, set `aoi_id <- id`, write; verify every other column is byte-identical
       (`cut -d, -f2-` diff before/after) and `unique(aoi_id) == id`. Local data only,
       gitignored — record the command and result in progress.md
-- [ ] Re-render nothing: reports do not carry `aoi_id` (confirm `git status` shows no
+- [x] Re-render nothing: reports do not carry `aoi_id` (confirm `git status` shows no
       `data/reports/` change)
-- [ ] CLAUDE.md: drop the Known issues line "The ledger's `aoi_id` holds WFS feature ids…"
+- [x] CLAUDE.md: drop the Known issues line "The ledger's `aoi_id` holds WFS feature ids…"
 
 ## Validation
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
 - [ ] `/planning-archive` on completion, then `/gh-pr-push`
 
