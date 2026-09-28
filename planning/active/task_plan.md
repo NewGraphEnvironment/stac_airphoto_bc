@@ -9,12 +9,12 @@ re-upserts an existing id whose content changed — and every rebuild here chang
 ids. The routine is `--all` (user's choice); `--drift` is a gap-filler.
 
 ## Phase 1: One registration command everywhere
-- [ ] `CLAUDE.md` Pipeline section: replace the three-script block with one `catalogue_register.sh` call (`STAC_COLLECTION`, `STAC_BUCKET_URL`, `STAC_REQUIRE_ASSET=thumbnail`), `--all` as the routine and `--verify` after, one line on why `--drift` is not enough here; drop the #42 sentence, keep the pypgstac warning
-- [ ] `CLAUDE.md` Known issues: point the pypgstac bullet at the one command
-- [ ] `scripts/README.md`: rewrite "After the Pipeline" around the same command, drop the delete-and-reload framing (the merged collection stays load-bearing — as the set `--verify` compares against; a dropped link surfaces as an orphan, not a deletion); Prerequisites row: tailnet SSH to `root@geopro` + a `stac_dem_bc` checkout instead of `GEOPRO_IP`
-- [ ] `scripts/run_pipeline.sh`: closing echo prints the same command
-- [ ] `scripts/06_catalogue_promote.sh`: closing heredoc prints the same command (keep the `curl /search` confirmation)
-- [ ] Grep `pypgstac|GEOPRO_IP|item_register|collection_register|stac_dem_bc#42` — only the CLAUDE.md warning and `planning/archive/` remain
+- [x] `CLAUDE.md` Pipeline section: replace the three-script block with one `catalogue_register.sh` call (`STAC_COLLECTION`, `STAC_BUCKET_URL`, `STAC_REQUIRE_ASSET=thumbnail`), `--all` as the routine and `--verify` after, one line on why `--drift` is not enough here; drop the #42 sentence, keep the pypgstac warning
+- [x] `CLAUDE.md` Known issues: point the pypgstac bullet at the one command
+- [x] `scripts/README.md`: rewrite "After the Pipeline" around the same command, drop the delete-and-reload framing (the merged collection stays load-bearing — as the set `--verify` compares against; a dropped link surfaces as an orphan, not a deletion); Prerequisites row: tailnet SSH to `root@geopro` + a `stac_dem_bc` checkout instead of `GEOPRO_IP`
+- [x] `scripts/run_pipeline.sh`: closing echo prints the same command
+- [x] `scripts/06_catalogue_promote.sh`: closing heredoc prints the same command (keep the `curl /search` confirmation)
+- [x] Grep `pypgstac|GEOPRO_IP|item_register|collection_register|stac_dem_bc#42` — only the CLAUDE.md warning and `planning/archive/` remain
 
 ## Phase 2: Verify
 - [ ] `bash -n` on both edited shell scripts

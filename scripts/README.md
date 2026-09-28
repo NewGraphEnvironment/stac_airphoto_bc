@@ -95,7 +95,7 @@ Two things worth knowing before you use `--limit`:
   validator prints `VACUOUS:` when this happens rather than letting a green
   partial run read as evidence.
 - The sync is not the end. pgstac still holds the old items until the collection
-  is re-registered on geopro, and that script deletes before it reloads.
+  is re-registered with `catalogue_register.sh --all` (After the Pipeline, below).
 
 ### Property casing, because pgstac `=` is case-sensitive
 
@@ -218,22 +218,43 @@ code.
 |-----------|---------------|
 | R packages | `fly`, `fresh`, `flooded`, `terra`, `sf`, `dplyr`, `arrow`, `purrr`. No fly version is pinned — `aoi_require_fly()` asserts that `dem` reaches `fly_filter()`, `fly_footprint()` and `fly_georef()`, which is the capability the pipeline depends on. Take the latest fly. |
 | Python (conda) | Environment `stac-airphoto-bc` with `pystac`, `rasterio`, `shapely`, `pyarrow` |
-| geopro | `GEOPRO_IP` set in the environment for the registration step |
+| geopro | For the registration step: tailnet SSH to `root@geopro`, and a [`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc) checkout at `~/Projects/repo/stac_dem_bc` with a Python that imports its `scripts/` modules — its `.venv` (gitignored, so build it on a new machine), its `stac-catalog` conda env activated, or `PYTHON=` set to an interpreter's full path (`$(conda info --base)/envs/stac-catalog/bin/python`; a directory or a bare `python` does not work). Without one the orchestrator exits 1 blaming the working directory. |
 | AWS CLI | Configured with write access to `s3://stac-airphoto-bc` |
 
 ## After the Pipeline
 
-The pipeline produces COGs on S3 and STAC catalog files on disk. To make the collection searchable at `images.a11s.one`, register it on the pgstac server:
+The pipeline produces COGs on S3 and STAC catalog files on disk. To make the collection searchable at `images.a11s.one`, register it on the pgstac server with `stac_dem_bc`'s orchestrator, after the S3 sync:
 
 ```bash
-ssh root@$GEOPRO_IP "bash /tmp/stac_register-pypgstac.sh stac-airphoto-bc https://stac-airphoto-bc.s3.us-west-2.amazonaws.com"
+cd ~/Projects/repo/stac_dem_bc
+( export STAC_COLLECTION=stac-airphoto-bc \
+    STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
+    STAC_REQUIRE_ASSET=thumbnail
+  bash scripts/catalogue_register.sh --all &&
+  bash scripts/catalogue_register.sh --verify )
 ```
 
-That script **deletes the collection and its items and reloads them from
-`collection.json`'s item links**. So the merged collection is load-bearing: a
-`collection.json` listing only the newest AOI would delete every other item from
-the catalog. `05_stac_register.py` asserts against the written file that no
-published link was dropped, and refuses to promote a collection that fails.
+It reads the **published** `collection.json`, fetches every item it links, and
+audits all of them (collection id, count, a `thumbnail` asset on each) before
+anything reaches the database; then it upserts the collection, then the items.
+Nothing is deleted.
+
+Use `--all`, not `--drift`. Drift compares id sets, so it registers only ids the
+API lacks and never refreshes an item already registered — and a rebuild here
+rewrites existing items' properties and checksums. `--verify` compares ids too, so
+it cannot see a stale item either; nothing in the chain compares content yet
+([stac_dem_bc#45](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/45)).
+The subshell keeps the variables out of your shell, where a later
+`catalogue_register.sh` meant for the DEM collection would act on this one.
+
+The merged collection is still load-bearing, as the set everything is compared
+against: a `collection.json` listing only the newest AOI would register just that
+AOI and `--verify` would report every other item as orphaned. `05_stac_register.py`
+asserts against the written file that no published link was dropped, and refuses
+to promote a collection that fails.
+
+Do not use `stac_register-pypgstac.sh`: it deletes the collection before
+reloading, and a failure between the two leaves the API empty.
 
 ### Building the conda environment
 

@@ -40,6 +40,25 @@ Measured before the merge (read-only, `audit-items` over `data/stac/`): 10,100 i
   `scripts/README.md` ("After the Pipeline"), `scripts/run_pipeline.sh`'s closing echo
   and `scripts/06_catalogue_promote.sh`'s closing heredoc — only CLAUDE.md had moved off it.
 
+## Verification (2026-09-28 UTC)
+
+- `audit-items --collection-id stac-airphoto-bc --require-asset thumbnail --expect 10100`
+  over the 10,100 local items (stdin, `collection.json` excluded): `OK: every item agrees
+  with its collection (require=thumbnail forbid=-)`. Negative control
+  `--require-asset dem`: `FAIL: 10100 item(s) lack asset 'dem'` — the check fires.
+- Live `catalogue_register.sh --verify` with the documented env, 06:12:04–06:12:18Z (14 s):
+  `asset audit: require=thumbnail forbid=-`, published 10100, registered 10100, missing 0,
+  orphaned 0, `IN SYNC`. `STAC_REQUIRE_ASSET` is honoured for a foreign collection.
+- The API returns `numberMatched: null` (probed with `/search`, `limit: 1`), so
+  `06_catalogue_promote.sh`'s old confirmation `jq '.numberMatched'` printed `null`
+  against its "Expect 1775". A replacement (`.features | length`) could not fail either
+  (1,810 items already carry the property), and a one-item API-vs-S3 property check
+  that followed was removed in code-check round 3: fixed sample unrelated to the run,
+  and `null == null` passes when nothing can be fetched. No content check remains;
+  the gap is upstream as stac_dem_bc#45.
+- `stac_dem_bc/scripts/item_register.sh:19`: "There is deliberately no delete path" —
+  the basis for "nothing is deleted" in the docs.
+
 ## Errors Encountered
 
 | Error | Resolution |
