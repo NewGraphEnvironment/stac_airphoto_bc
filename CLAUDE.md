@@ -68,20 +68,25 @@ AOIs therefore share a frame rather than publishing it twice.
 outcome, reconciled against the centroid cache. `data/reports/<id>.md` renders
 from it.
 
-Registration on geopro (separate step, over the tailnet as `root@geopro`), with the
-**upsert** scripts in `stac_dem_bc` — collection first, then items, then a set-equality
-check against what S3 publishes:
+Registration on geopro (separate step, after the sync, over the tailnet as
+`root@geopro`) is `stac_dem_bc`'s orchestrator. It fetches the **published**
+`collection.json` and every item it links, audits them all (collection id, count, a
+`thumbnail` asset on each), and only then upserts the collection and then the items:
 ```bash
 cd ~/Projects/repo/stac_dem_bc
-export STAC_COLLECTION=stac-airphoto-bc STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com
-bash scripts/collection_register.sh ~/Projects/repo/stac_airphoto_bc/data/stac/collection.json
-find ~/Projects/repo/stac_airphoto_bc/data/stac -maxdepth 1 -type f -name '*.json' ! -name collection.json \
-  | bash scripts/item_register.sh            # --dryrun first
-bash scripts/catalogue_register.sh --verify
+( export STAC_COLLECTION=stac-airphoto-bc \
+    STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
+    STAC_REQUIRE_ASSET=thumbnail
+  bash scripts/catalogue_register.sh --all &&
+  bash scripts/catalogue_register.sh --verify )
 ```
-`catalogue_register.sh --all`/`--drift` cannot be used for this collection: its
-pre-load audit requires a `dem` asset on every item, so it refuses all of ours before
-loading anything (stac_dem_bc#42). `item_register.sh` and `--verify` are generic.
+`--all`, not `--drift`: drift diffs **id sets**, so it registers only ids the API
+lacks and never refreshes an id already there. Every rebuild here rewrites existing
+ids (#23 rewrote all of them), and pgstac would keep their old properties and
+checksums while `--verify`, which compares ids too, still passes (stac_dem_bc#45:
+nothing checks content). The subshell keeps
+the variables out of the shell, where a later `catalogue_register.sh` meant for the
+DEM collection would silently act on this one.
 Not rtj's `stac_register-pypgstac.sh`: it DELETEs the collection before reloading, and
 `pgstac.items.collection` cascades, so a failure between the two leaves the API empty
 (2026-08-29).
@@ -254,8 +259,8 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
   success for frames it did not write this run.
 - `stac_register-pypgstac.sh` on geopro **deletes and reloads** from
   `collection.json`, and aborts after the delete if any item fetch fails, leaving
-  the collection empty. Register with the `stac_dem_bc` upsert scripts instead
-  (Pipeline, above).
+  the collection empty. Register with `stac_dem_bc`'s
+  `catalogue_register.sh --all` instead (Pipeline, above).
 
 <!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 

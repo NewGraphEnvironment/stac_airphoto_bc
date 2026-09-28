@@ -34,7 +34,7 @@
 # More importantly it fixes `collection.json`. `04_s3_upload.R` syncs every
 # `*.json` in `data/stac`, and `collection.json` is one of them — so a stale
 # local copy would be pushed over the published collection, which
-# `stac_register-pypgstac.sh` then reloads pgstac from. `05_stac_register.py`
+# `catalogue_register.sh` then reads to register pgstac. `05_stac_register.py`
 # FETCHES the published collection and merges into it, refusing to shrink it, so
 # running it immediately before the sync makes the local file provably derived
 # from the live one. That is a stronger guarantee than excluding the file from
@@ -105,21 +105,17 @@ Rscript scripts/04_s3_upload.R
 cat <<'EOF'
 
 Synced. The new properties are on S3 but NOT yet queryable: pgstac still holds
-the old items. Re-register on geopro to make them searchable:
+the old items. Re-register on geopro to make them searchable (upsert; nothing
+is deleted):
 
-  ssh root@$GEOPRO_IP "bash /tmp/stac_register-pypgstac.sh stac-airphoto-bc \
-    https://stac-airphoto-bc.s3.us-west-2.amazonaws.com"
+  cd ~/Projects/repo/stac_dem_bc
+  ( export STAC_COLLECTION=stac-airphoto-bc \
+      STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
+      STAC_REQUIRE_ASSET=thumbnail
+    bash scripts/catalogue_register.sh --all &&
+    bash scripts/catalogue_register.sh --verify )
 
-That script DELETES the collection and reloads it, and aborts after the delete
-if any item fetch fails — so it is the riskiest command in this pipeline and is
-deliberately not run from here. Afterwards, confirm the point of the exercise:
-
-  curl -s -X POST https://images.a11s.one/search \
-    -H 'Content-Type: application/json' \
-    -d '{"collections":["stac-airphoto-bc"],
-         "query":{"airphoto:georef_metadata":{"eq":true}},
-         "limit":1}' | jq '.numberMatched'
-
-Expect 1775. Set `limit` explicitly on any check like this — a default page size
-reads as absence.
+--all, not --drift: every item here already exists in pgstac, and drift only
+registers ids the API lacks. `--verify` compares ids too, so it cannot confirm
+the new properties landed; nothing checks content yet (stac_dem_bc#45).
 EOF

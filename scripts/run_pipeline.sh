@@ -61,7 +61,16 @@ Rscript scripts/04_s3_upload.R
 
 echo ""
 echo "=== DONE ==="
-echo "Run pypgstac on geopro to load into the catalog:"
-echo "  ssh root@\${GEOPRO_IP:?set GEOPRO_IP} \\"
-echo "    'bash /tmp/stac_register-pypgstac.sh stac-airphoto-bc \\"
-echo "     https://stac-airphoto-bc.s3.us-west-2.amazonaws.com'"
+cat <<'EOF'
+Register on geopro to make it searchable (upsert; nothing is deleted):
+
+  cd ~/Projects/repo/stac_dem_bc
+  ( export STAC_COLLECTION=stac-airphoto-bc \
+      STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
+      STAC_REQUIRE_ASSET=thumbnail
+    bash scripts/catalogue_register.sh --all &&
+    bash scripts/catalogue_register.sh --verify )
+
+--all, not --drift: drift registers only ids the API lacks and never refreshes
+an item this run rebuilt.
+EOF
