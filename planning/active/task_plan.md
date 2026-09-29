@@ -25,22 +25,22 @@ fly's next release (NewGraphEnvironment/fly#56) changes the shape of every **gra
 - [x] `scripts/README.md`, if it describes the COG shape.
 
 ## Phase 4: Local cold rebuild on fly 0.19.0 (no publish)
-- [ ] Commit phases 1–3 first. `pipeline_sha` stamps uncommitted code as `-dirty`, and Rscript must not be edited mid-run.
+- [x] Commit phases 1–3 first. `pipeline_sha` stamps uncommitted code as `-dirty`, and Rscript must not be edited mid-run.
 - [x] Snapshot for the diff into `data/_pre36/`: `data/select/*.csv`, `data/window/*.parquet`, the item JSONs, `collection.json`, the georef manifest, `published.parquet`.
 - [x] Refresh `data/catalogue/published.parquet` (`06_catalogue_fetch.R`): it held 9,976 ids against 10,100 published (review-plan B1).
 - [x] Install fly 0.19.0 from GitHub (unpinned, per the Architecture section). `tests/test_aoi.R` must be green, including the footprint-column check.
-- [ ] Run each stage on its own, logging to `data/logs/rebuild36/` (not `run_pipeline.sh`, which ends in the upload):
+- [x] Run each stage on its own, logging to `data/logs/rebuild36/` (not `run_pipeline.sh`, which ends in the upload):
   - `01_fetch.R` for all AOIs, with the fresh-db env and `FORCE_REFRESH` left FALSE. Then, before 02, every published id must still be selected (O1)
   - `02_georef.R`
   - `03_cog.py --check-determinism`, then `03_cog.py`
   - `05_stac_register.py --require-all-published`
   - `stac_validate.py`, only if 05 exits 0 (O2)
-- [ ] Pass criteria (AC5):
+- [x] Pass criteria (AC5):
   - 03 prints `N written, 0 unchanged`, with N the number of GeoTIFFs
   - 05 exits 0 with 0 published items not rebuilt
   - `stac_validate.py` reports N of N
   - 0 selected ids dropped
-- [ ] Measure:
+- [x] Measure:
   - band shape per id against the snapshot (AC1): every old 1-band grey COG is now `(gray, alpha)` with mask flags `[per_dataset, alpha]`, every RGBA is still RGBA, and none has a NoData
   - alpha values outside {0, 255}, as a count (A1)
   - grayscale frames with a genuine 0 under alpha 255, which the old shape could not hold (AC2)
@@ -48,7 +48,7 @@ fly's next release (NewGraphEnvironment/fly#56) changes the shape of every **gra
   - selection diff against the snapshot ledgers (new, dropped)
   - `height_source` counts before and after
   - footprint change: frames whose `footprint_digest` changed vs did not (S1), and the `height_agl` ratio on the changed ones (G4)
-- [ ] Write the numbers into `findings.md`, and later the archive README's Measurement and Evidence sections.
+- [x] Write the numbers into `findings.md`, and later the archive README's Measurement and Evidence sections.
 
 ## Phase 5: Close out
 - [ ] Edit the #36 body: tick the writer, tests and overview items. State what remains: the sync, which re-uploads every COG, not only grayscale (S2); `catalogue_register.sh --all` on geopro; and a render check of a Gray + Alpha item on images.a11s.one (S4).

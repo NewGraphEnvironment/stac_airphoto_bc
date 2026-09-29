@@ -81,3 +81,37 @@ Source JPG band counts, measured: <1986 1-band 2,766, 3-band 22; ≥1986 1-band 
 fly main `0eeb977` has no R/, inst/, DESCRIPTION or NAMESPACE diff from `v0.19.0`. That SHA is what `nge:fly_sha` will record.
 
 `published.parquet` refreshed: 9,976 → 10,100 rows. The freshness guard is filed as #37.
+
+## Rebuild: 01_fetch.R (fly 0.19.0 `0eeb977`, pipeline `e16dd5307f57`)
+
+- 2026-09-29 06:28–07:03 UTC (35 min), exit 0, all four AOIs, `FORCE_REFRESH` FALSE. Log: `data/logs/rebuild36/01_fetch.log`
+- No `dem_shortfall_m` abort (review-plan G1 did not fire)
+- **O1 union check:** 10,100 published ids, 10,100 selected, **0 published lost**, 0 new. `selection_basis`: footprint 9,989, published 281 (per (aoi, id))
+- Selected per AOI: neexdzii_kwa 9,824 (unchanged); se_a 167 → 173; se_b → 171; se_c 102. se_a's +6 are all "already published". They are frames published through another AOI, which the refreshed snapshot now protects in se_a too (review-plan B1). The unique count is unchanged
+- `data/reports/*.md` also change in row and column order only (the rendering follows ledger order). They are committed with the rebuild
+- 01 printed "There were 17 warnings" without their text. None aborted; not investigated
+
+## Rebuild: 02_georef.R
+
+- 07:03–08:31 UTC (88 min), exit 0: 9,824 / 173 / 171 / 102 georeferenced, no failures. Log: `data/logs/rebuild36/02_georef.log`
+- **Cold path confirmed.** All 10,100 GeoTIFFs have an mtime after 02 started (0 reused). All 10,100 manifest rows record fly `0eeb977c3893` and pipeline `e16dd5307f57`
+- `03_cog.py --check-determinism`: `bc5255_203_thumb.tif`, a 1967 grey frame, wrote identical bytes twice. This covers one frame only (review-plan AC3); RGBA determinism rests on the synthetic test
+
+## Rebuild: 03, 05, validate and measurement
+
+- **03:** 08:32–09:27 UTC (55 min), exit 0, `10100 COGs written, 0 unchanged`. Every frame passed the alpha-mask guard and `check_same_raster()`
+- **05 `--require-all-published`:** exit 0; 10,100 generated, 10,100 published links → 10,100 written; **published items not rebuilt: 0**
+- **`stac_validate.py`:** `10100 of 10100 items pass`
+- **Band shape, per path against the pre-rebuild census (AC1):**
+  - `gray` (NoData 0) → `gray|alpha`: **3,746**
+  - RGBA → RGBA: **6,354**
+  - 0 COGs lost; 0 with a NoData; 0 whose image bands are not masked `[per_dataset, alpha]`
+- **Alpha outside {0, 255}: 0 COGs (A1).** The bilinear `-srcalpha` warp still gives a binary alpha on these thumbnails
+- **The defect is gone (AC2): 2,216 of 3,746 grey frames (59%) carry 71,100 genuine-black pixels under alpha 255** — pixels the published shape rewrote as 1. Checked against the published S3 copies via `/vsicurl` on the three worst frames (all roll bcb94081, the roll fly#56 measured) and the median frame:
+  - same grid
+  - same fill (old 0 ⇔ alpha 0)
+  - every differing interior pixel is old 1 → new 0: 9,277, 6,967, 3,805 and 2 pixels, nothing else
+- **Geometry unchanged (S1, G4):** `footprint_digest` changed on 0 of 10,100 items, `height_agl` on 0 of 9,488. None of the 53 rolls in fly's `flying_height_rolls.csv` has a selected frame in these AOIs, so fly 0.16–0.18 move nothing here. The rebuild is the band change plus the new `FLY_SHA` / `PIPELINE_SHA` tags
+- **Ledger:** 16 (aoi, id) rows moved `footprint_misses_aoi` → `selected` (se_a +6, se_b +10). All of them are frames already published through another AOI, now protected by the refreshed snapshot. Unique ids 10,100 → 10,100
+- Logs: `data/logs/rebuild36/` (`01_fetch`, `02_georef`, `03_cog_determinism`, `03_cog`, `05_stac_register`, `stac_validate`, `measure`)
+- Still to do: the sync re-uploads every COG (all checksums change) and every item JSON. Not done; waits for the user's go
