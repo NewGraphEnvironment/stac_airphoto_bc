@@ -44,3 +44,40 @@ fly 0.19.0 released 2026-09-28 (fly#56, PR fly#79); installed here 0.15.0.
 
 | Error | Resolution |
 |-------|------------|
+
+## Pre-rebuild baseline (2026-09-28, fly 0.15.0 tree)
+
+Snapshot in `data/_pre36/` (ledgers, windows, 10,100 item JSONs + collection, georef manifest).
+Measured by the scratch probe `measure36.py`, which reported zero diff when run against the unchanged tree:
+
+- COGs: 6,354 RGBA `(red, green, blue, alpha)`, no NoData; **3,746 grayscale 1-band `(gray)`, NoData 0** — the shape #36 replaces
+- Ledgers: 17,529 rows; 10,254 selected (aoi, id) = 10,100 unique ids; 7,007 footprint_misses_aoi, 268 no_thumbnail_url
+- height_source on selected: reported 9,474, NA 564 (digital, GSD-sized), implausible 202, corrected_unit_slip 14
+- fly 0.19.0 installed from GitHub main (`0eeb977`); `tests/test_aoi.R` all pass, footprint-column check included
+
+## Code-check (phases 1–3): four rounds, ended by enumeration
+
+| Round | Findings | Fixed | Accepted | Inside previous fix? |
+|---|---|---|---|---|
+| plan review | 1 conditional blocker, 6 gaps, 5 ordering, 6 assumptions, 4 scope, 5 acceptance | see `review-plan.md` | — | — |
+| 1 | 2 (overview comment credited nearest resampling, and GDAL 3.12.4 keeps alpha binary under average and cubic too; the known-issue bullet asserted a rebuild that had not happened) | 2 | 0 | — |
+| 2 | 1 (Gray + Alpha + NoData 0 passed the guard; GDAL lets the NoData win, so interior black is masked again, and `check_same_raster()` can't see it because both sides carry the NoData) | 1 | 0 | n (a gap in the original guard) |
+| 3 | 3 (the round-2 NoData half made the no-alpha test vacuous, since its fixture also had NoData 0; the guard checked colorinterp, which is a proxy for the mask, so 3- and 5-band sets ending in alpha passed unmasked; the Source data line was false) | 3 | 0 | **y** |
+
+**Mechanism (round 3):** a setting or a colorinterp was credited with a property it doesn't guarantee. The guard now checks the property: every image band's `mask_flag_enums` is `[per_dataset, alpha]`.
+
+**Enumeration that ends the loop.** `SHAPES` in `tests/test_cog.py` covers band count 1–5, with and without a trailing alpha, with and without a NoData, and each fixture's actual mask flags were printed and match its label. Mutation table:
+
+| Mutation | Red |
+|---|---|
+| drop `not image` | 2 (both 1-band shapes) |
+| drop `any(...)` | 5 (every refused shape with ≥2 bands) |
+| drop the guard | all 7 refused shapes |
+| mask over all bands, not `[:-1]` | 10 (every accepted write) |
+| drop `alpha=YES` | 5 (every grey write) |
+
+Source JPG band counts, measured: <1986 1-band 2,766, 3-band 22; ≥1986 1-band 985, 3-band 6,332. So band count follows the roll, not the year.
+
+fly main `0eeb977` has no R/, inst/, DESCRIPTION or NAMESPACE diff from `v0.19.0`. That SHA is what `nge:fly_sha` will record.
+
+`published.parquet` refreshed: 9,976 → 10,100 rows. The freshness guard is filed as #37.

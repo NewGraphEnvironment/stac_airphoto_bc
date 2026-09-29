@@ -32,6 +32,7 @@ from pathlib import Path
 
 import rasterio
 from affine import Affine
+from rasterio.enums import MaskFlags
 from rasterio.io import MemoryFile
 from rasterio.shutil import copy as rio_copy
 
@@ -48,6 +49,8 @@ MANIFEST = Path("data/raw/georef/manifest.csv")
 LEDGER_DIR = Path("data/select")
 
 COG_OPTIONS = {"compress": "DEFLATE", "overview_resampling": "nearest"}
+# The mask of every image band in fly's output: its last band, an alpha (#36).
+ALPHA_MASK = [MaskFlags.per_dataset, MaskFlags.alpha]
 
 # Catalogue fields, as before #23.
 CATALOGUE_TAGS = [
@@ -126,6 +129,18 @@ def write_cog(src: Path, dst: Path, tags: dict, dx: float, dy: float) -> bytes:
         if t.b != 0 or t.d != 0:
             raise SystemExit(f"{src}: geotransform is rotated; a translation of the origin "
                              "would not be a translation of the footprint")
+        # fly 0.19.0 (fly#56) ends every frame in an alpha band and sets no NoData.
+        # Before it, grey frames were NoData 0, and GDAL rewrote genuine black
+        # inside them as 1 so it would not read as fill. So check the mask a reader
+        # sees, not the colorinterp: a NoData beside the alpha wins over it, and an
+        # alpha in a 3- or 5-band dataset masks nothing. A 1-band raster has no
+        # image band left once the last is set aside, hence `not image`.
+        image = ds.mask_flag_enums[:-1]
+        if not image or any(f != ALPHA_MASK for f in image):
+            raise SystemExit(f"{src}: not fly's alpha-masked shape (colorinterp "
+                             f"{ds.colorinterp}, nodata {ds.nodata}, mask "
+                             f"{ds.mask_flag_enums}) — install fly from GitHub and "
+                             "re-run 01_fetch.R and 02_georef.R for every AOI")
         profile = ds.profile.copy()
         data = ds.read()
         colorinterp = ds.colorinterp
@@ -134,6 +149,9 @@ def write_cog(src: Path, dst: Path, tags: dict, dx: float, dy: float) -> bytes:
         # (dx, dy) moves every pixel by exactly (dx, dy) on the ground.
         profile.update(driver="GTiff", transform=Affine.translation(dx, dy) * t)
 
+    # A GTiff created without ALPHA=YES ignores an alpha colorinterp on a 2-band
+    # (Gray + Alpha) dataset and writes it as undefined; RGBA keeps it either way.
+    profile["alpha"] = "YES"
     with MemoryFile() as mf:
         with mf.open(**profile) as mem:
             mem.write(data)
@@ -153,7 +171,8 @@ def check_same_raster(src: Path, out: Path, dx: float, dy: float) -> None:
     255 and dropped the colour interpretation on every band, so a published RGBA
     frame read its whole alpha-masked interior as nodata and a grey frame masked
     its genuinely white pixels. Nothing failed. So the properties a consumer
-    reads are compared here on every file, not once in a test.
+    reads are compared here on every file, not once in a test. That caught the
+    next one too: a Gray + Alpha frame losing its alpha colorinterp (#36).
     """
     with rasterio.open(src) as a, rasterio.open(out) as b:
         same = (a.count == b.count and a.dtypes == b.dtypes and a.nodata == b.nodata

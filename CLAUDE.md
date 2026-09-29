@@ -112,12 +112,28 @@ and flips the ghost header's `KNOWN_INCOMPATIBLE_EDITION` to `YES`; that is what
 the old `03_cog_tag.py` did. No run timestamp is tagged: the write is
 deterministic, so an unchanged frame keeps its bytes and its checksum.
 
+### COG bands (#36)
+
+Every COG ends in an alpha band and carries no NoData: grayscale is 2 bands,
+Gray + Alpha, and RGB is 4, RGBA. Alpha 0 is fill. That is fly 0.19.0's output
+contract (fly#56). Before it, grayscale was 1 band with `NoData=0`, and GDAL
+rewrote genuine black inside the frame as 1. `03_cog.py` refuses any GeoTIFF
+whose image bands are not all masked by its last band, an alpha. It checks the
+mask a reader sees, not the colorinterp: a NoData beside the alpha wins over it,
+and an alpha in a 3- or 5-band dataset masks nothing. So an older fly cannot
+republish the old shape. It creates the
+in-memory copy with `ALPHA=YES`, because rasterio otherwise writes a 2-band
+dataset's alpha colorinterp as undefined and `check_same_raster()` refuses the
+frame. At every overview level the alpha stays 0/255 and is the mask a reader
+sees (`tests/test_cog.py`). GDAL keeps it binary whatever `overview_resampling`
+says (measured on 3.12.4); `nearest` is for the image bands.
+
 ### Source data
 
 - BC Data Catalogue centroid layer: **29 columns**, all of them cached — `01_fetch.R` collects the whole row with no `select()`
 - Column semantics are documented by the source: `bcdata::bcdc_describe_feature()` returns per-column comments, which is where the GSD unit and the tile casing came from
 - ~97% of photos have thumbnail URLs (openmaps.gov.bc.ca/thumbs/ JPGs, ~1250x1250)
-- Grayscale (1 band) pre-1986, RGB+alpha (4 band) post-1986
+- Grayscale (1 band) or RGB (3 bands) by roll, not by year: of the local JPGs, 22 before 1986 are RGB and 985 from 1986 on are grey (2026-09-28). Georeferenced, each gains an alpha band (COG bands, above)
 
 ### Directory conventions
 
@@ -252,6 +268,10 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
 - **Roll-model placements are carried past what was measured.** Of the 211
   `roll_model` frames on three rolls, 135 lie outside the measured area, where
   the roll's shift is extrapolated along the roll untested.
+- **Published grayscale COGs are the pre-#36 shape until the next sync**: 1 band,
+  `NoData=0`, with interior black written as 1. Once the local tree is rebuilt on
+  fly 0.19.0 (Gray + Alpha), local and S3 differ until `04_s3_upload.R` and the
+  geopro registration run.
 - **`scripts/run_pipeline.sh` and `scripts/test_pipeline.R` both end in the S3
   upload.** Run the stages individually when the result must not be published.
 - **Check the cold path when measuring georeferencing.** A re-run over a
