@@ -51,12 +51,12 @@ fly's next release (NewGraphEnvironment/fly#56) changes the shape of every **gra
 - [x] Write the numbers into `findings.md`, and later the archive README's Measurement and Evidence sections.
 
 ## Phase 5: Close out
-- [ ] Edit the #36 body: tick the writer, tests and overview items. State what remains: the sync, which re-uploads every COG, not only grayscale (S2); `catalogue_register.sh --all` on geopro; and a render check of a Gray + Alpha item on images.a11s.one (S4).
-- [ ] File the `published.parquet` freshness guard as its own issue (S3).
-- [ ] `/planning-archive`, then `/gh-pr-push`. The PR says "Part of #36", not "Closes", so the issue stays open until the publish.
+- [x] Edit the #36 body: tick the writer, tests and overview items. State what remains: the sync, which re-uploads every COG, not only grayscale (S2); `catalogue_register.sh --all` on geopro; and a render check of a Gray + Alpha item on images.a11s.one (S4).
+- [x] File the `published.parquet` freshness guard as its own issue (S3).
+- [x] `/planning-archive`, then `/gh-pr-push`. The PR says "Part of #36", not "Closes", so the issue stays open until the publish.
 
 ## Validation
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
+- [x] `/planning-archive` on completion
