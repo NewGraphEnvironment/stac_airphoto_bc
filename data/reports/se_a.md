@@ -1,28 +1,28 @@
 # se_a — Southeast BC A
 
-Generated 2026-09-26
+Generated 2026-09-29
 
 ## Summary
 
 - Frames in the 8 km fetch window: **818**
-- Frames selected: **167** (119 by footprint, 48 because already published)
+- Frames selected: **173** (119 by footprint, 54 because already published)
 - Year range obtained: **1972–2005**
 
 ## Selected by era
 
 |era       | selected|
 |:---------|--------:|
-|1980_1999 |       87|
-|2000plus  |       23|
-|pre1980   |       57|
+|1980_1999 |       91|
+|2000plus  |       24|
+|pre1980   |       58|
 
 ## Every frame accounted for, by era
 
 |era       | footprint_misses_aoi| selected| no_thumbnail_url|
 |:---------|--------------------:|--------:|----------------:|
-|1980_1999 |                  285|       87|                0|
-|2000plus  |                  102|       23|                0|
-|pre1980   |                  255|       57|                9|
+|1980_1999 |                  281|       91|                0|
+|2000plus  |                  101|       24|                0|
+|pre1980   |                  254|       58|                9|
 
 ## How each footprint was sized
 
@@ -40,17 +40,17 @@ Generated 2026-09-26
 
 |rotation_source   | frames|
 |:-----------------|------:|
-|assumed_by_series |    167|
+|assumed_by_series |    173|
 
 |placement_source | frames|
 |:----------------|------:|
-|none             |    167|
+|none             |    173|
 
 |height_source       | frames|
 |:-------------------|------:|
 |corrected_unit_slip |      6|
 |implausible         |      5|
-|reported            |    156|
+|reported            |    162|
 
 - Rolls at `assumed_by_series`: `bc5674`, `bc5675`, `bc7434`, `bc77033`, `bc77034`, `bc77108`, `bc78107`, `bc78142`, `bc79058`, `bc80055`, `bc80108`, `bc81034`, `bc81035`, `bc81106`, `bc82035`, `bc88029`, `bc88030`, `bcb00003`, `bcb93015`, `bcb93018`, `bcb95088`, `bcc04024`, `bcc04025`, `bcc05001`, `bcc273`, `bcc72`, `bcc73`, `bcc74`, `bcc837`, `bcc838`, `bcc839`
 - Rolls at `disputed`: none
@@ -60,9 +60,9 @@ Generated 2026-09-26
 
 |rejected_reason      | frames|
 |:--------------------|------:|
-|footprint_misses_aoi |    642|
+|footprint_misses_aoi |    636|
 |no_thumbnail_url     |      9|
-|selected             |    167|
+|selected             |    173|
 
 Rejection reasons:
 

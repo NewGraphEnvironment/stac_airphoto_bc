@@ -1,7 +1,8 @@
 """Tests for the single-write COG stage and the checks around it (#23, #30).
 
-Synthetic GeoTIFFs shaped like fly's output — a grey frame with nodata 0, an RGBA
-frame with an alpha mask — so the tests run on a fresh clone with no data.
+Synthetic GeoTIFFs shaped like fly's output — a grey frame as Gray + Alpha and an
+RGB frame as RGBA, neither with a NoData (fly 0.19.0, fly#56) — so the tests run on
+a fresh clone with no data.
 
 Run:
     conda run -n stac-airphoto-bc pytest tests/ -q
@@ -15,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
-from rasterio.enums import ColorInterp
+from rasterio.enums import ColorInterp, MaskFlags
 from rasterio.transform import from_origin
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -33,23 +34,64 @@ cog = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cog)
 
 
-def fly_like(path: Path, rgba: bool) -> Path:
+def fly_like(path: Path, rgba: bool, size: int = 64) -> Path:
+    """fly_georef()'s output: image bands then an alpha, 0 in the collar."""
     rng = np.random.default_rng(1)
-    count = 4 if rgba else 1
-    data = rng.integers(1, 256, size=(count, 64, 64), dtype=np.uint8)
-    data[:, :4, :] = 0  # a collar
-    profile = dict(driver="GTiff", width=64, height=64, count=count, dtype="uint8",
-                   crs="EPSG:3005", transform=from_origin(1_200_000, 900_000, 50, 50))
-    if rgba:
-        data[3] = np.where(data[0] == 0, 0, 255)
-    else:
-        profile["nodata"] = 0
+    count = 4 if rgba else 2
+    # Genuine black inside the frame: under -dstnodata 0 it was rewritten as 1.
+    data = rng.integers(0, 256, size=(count, size, size), dtype=np.uint8)
+    data[:, : size // 16, :] = 0  # a collar
+    data[-1] = 255
+    data[-1, : size // 16, :] = 0
+    profile = dict(driver="GTiff", width=size, height=size, count=count, dtype="uint8",
+                   crs="EPSG:3005", transform=from_origin(1_200_000, 900_000, 50, 50),
+                   alpha="YES")
     with rasterio.open(path, "w", **profile) as ds:
         ds.write(data)
-        if rgba:
-            ds.colorinterp = [ColorInterp.red, ColorInterp.green, ColorInterp.blue,
-                              ColorInterp.alpha]
+        ds.colorinterp = ([ColorInterp.red, ColorInterp.green, ColorInterp.blue] if rgba
+                          else [ColorInterp.gray]) + [ColorInterp.alpha]
     return path
+
+
+def shaped(path: Path, interp: list, nodata=None) -> Path:
+    """A GeoTIFF with these colour interpretations and NoData, alpha 0 in a collar."""
+    count = len(interp)
+    data = np.random.default_rng(1).integers(0, 256, size=(count, 64, 64), dtype=np.uint8)
+    data[:, :4, :] = 0
+    if interp[-1] == ColorInterp.alpha:
+        data[-1] = 255
+        data[-1, :4, :] = 0
+    with rasterio.open(path, "w", driver="GTiff", width=64, height=64, count=count,
+                       dtype="uint8", crs="EPSG:3005", nodata=nodata,
+                       transform=from_origin(1_200_000, 900_000, 50, 50),
+                       **({"alpha": "YES"} if interp[-1] == ColorInterp.alpha else {})) as ds:
+        ds.write(data)
+        ds.colorinterp = interp
+    return path
+
+
+G, R, Gr, B, A, U = (ColorInterp.gray, ColorInterp.red, ColorInterp.green,
+                     ColorInterp.blue, ColorInterp.alpha, ColorInterp.undefined)
+# Every shape the guard has to classify. Band count x trailing alpha x NoData.
+SHAPES = {
+    "gray+alpha (fly 0.19)":        ([G, A], None, True),
+    "rgba (fly 0.19)":              ([R, Gr, B, A], None, True),
+    "gray, nodata 0 (fly < 0.19)":  ([G], 0, False),
+    "gray, no nodata":              ([G], None, False),
+    "rgb, no nodata":               ([R, Gr, B], None, False),
+    "gray+alpha, nodata 0":         ([G, A], 0, False),
+    "rgba, nodata 0":               ([R, Gr, B, A], 0, False),
+    "gray+undefined+alpha":         ([G, U, A], None, False),
+    "rgb+undefined+alpha":        ([R, Gr, B, U, A], None, False),
+}
+
+
+@pytest.mark.parametrize("rgba", [False, True])
+def test_the_fixture_is_the_shape_fly_writes(tmp_path, rgba):
+    with rasterio.open(fly_like(tmp_path / "src.tif", rgba)) as ds:
+        assert ds.count == (4 if rgba else 2) and ds.nodata is None
+        assert ds.colorinterp[-1] == ColorInterp.alpha
+        assert ds.mask_flag_enums[0] == [MaskFlags.per_dataset, MaskFlags.alpha]
 
 
 @pytest.mark.parametrize("rgba", [False, True])
@@ -84,11 +126,45 @@ def test_an_in_place_tag_edit_breaks_the_layout_and_the_check_sees_it(tmp_path):
     assert not cog_layout_ok(out)
 
 
-def test_the_write_is_deterministic(tmp_path):
-    src = fly_like(tmp_path / "src.tif", rgba=True)
+@pytest.mark.parametrize("rgba", [False, True])
+def test_the_write_is_deterministic(tmp_path, rgba):
+    src = fly_like(tmp_path / "src.tif", rgba)
     out = tmp_path / "out.tif"
     first = cog.write_cog(src, out, {"AIRP_ID": "1"}, 10.0, 10.0)
     assert cog.write_cog(src, out, {"AIRP_ID": "1"}, 10.0, 10.0) == first
+
+
+@pytest.mark.parametrize("rgba", [False, True])
+def test_overviews_carry_the_alpha(tmp_path, rgba):
+    # Large enough that the COG driver builds overviews. At each level the alpha
+    # must stay binary and be the mask a reader sees. This pins that property, not
+    # nearest resampling: GDAL 3.12.4 keeps an alpha overview binary under
+    # `average` and `cubic` too (measured, code-check round 1).
+    src = fly_like(tmp_path / "src.tif", rgba, size=1024)
+    out = tmp_path / "out.tif"
+    out.write_bytes(cog.write_cog(src, out, {}, 0.0, 0.0))
+    with rasterio.open(out) as ds:
+        assert ds.overviews(1)
+        for f in ds.overviews(1):
+            h, w = ds.height // f, ds.width // f
+            alpha = ds.read(ds.count, out_shape=(h, w))
+            assert set(np.unique(alpha).tolist()) == {0, 255}
+            assert np.array_equal(ds.read_masks(1, out_shape=(h, w)), alpha)
+
+
+@pytest.mark.parametrize("name", SHAPES)
+def test_only_an_alpha_masked_geotiff_is_written(tmp_path, name):
+    # Refused shapes: fly < 0.19.0's NoData 0 rewrote genuine black as 1; a NoData
+    # beside an alpha wins over it, masking that black again; an alpha in a 3- or
+    # 5-band dataset masks nothing. check_same_raster() cannot see the last three,
+    # because the source and the COG agree.
+    interp, nodata, ok = SHAPES[name]
+    src = shaped(tmp_path / "src.tif", interp, nodata)
+    if ok:
+        cog.write_cog(src, tmp_path / "o.tif", {}, 0.0, 0.0)
+    else:
+        with pytest.raises(SystemExit, match="alpha-masked shape"):
+            cog.write_cog(src, tmp_path / "o.tif", {}, 0.0, 0.0)
 
 
 def test_a_rotated_geotransform_is_refused(tmp_path):

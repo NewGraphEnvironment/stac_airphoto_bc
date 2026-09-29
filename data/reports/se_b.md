@@ -1,27 +1,27 @@
 # se_b — Southeast BC B
 
-Generated 2026-09-26
+Generated 2026-09-29
 
 ## Summary
 
 - Frames in the 8 km fetch window: **840**
-- Frames selected: **161** (115 by footprint, 46 because already published)
+- Frames selected: **171** (115 by footprint, 56 because already published)
 - Year range obtained: **1972–2005**
 
 ## Selected by era
 
 |era       | selected|
 |:---------|--------:|
-|1980_1999 |       80|
-|2000plus  |       23|
+|1980_1999 |       89|
+|2000plus  |       24|
 |pre1980   |       58|
 
 ## Every frame accounted for, by era
 
 |era       | footprint_misses_aoi| selected| no_thumbnail_url|
 |:---------|--------------------:|--------:|----------------:|
-|1980_1999 |                  290|       80|                0|
-|2000plus  |                  124|       23|                0|
+|1980_1999 |                  281|       89|                0|
+|2000plus  |                  123|       24|                0|
 |pre1980   |                  258|       58|                7|
 
 ## How each footprint was sized
@@ -40,19 +40,19 @@ Generated 2026-09-26
 
 |rotation_source   | frames|
 |:-----------------|------:|
-|assumed_by_series |    161|
+|assumed_by_series |    171|
 
 |placement_source | frames|
 |:----------------|------:|
-|none             |    161|
+|none             |    171|
 
 |height_source       | frames|
 |:-------------------|------:|
 |corrected_unit_slip |      6|
 |implausible         |      5|
-|reported            |    150|
+|reported            |    160|
 
-- Rolls at `assumed_by_series`: `bc5674`, `bc5675`, `bc7434`, `bc77033`, `bc77034`, `bc77108`, `bc78107`, `bc78142`, `bc79058`, `bc80055`, `bc80108`, `bc81034`, `bc81035`, `bc81106`, `bc82035`, `bc88029`, `bc88030`, `bcb00003`, `bcb93015`, `bcb93018`, `bcb95088`, `bcc04024`, `bcc04025`, `bcc05001`, `bcc273`, `bcc72`, `bcc73`, `bcc74`, `bcc837`, `bcc839`
+- Rolls at `assumed_by_series`: `bc5674`, `bc5675`, `bc7434`, `bc77033`, `bc77034`, `bc77108`, `bc78107`, `bc78142`, `bc79058`, `bc80055`, `bc80108`, `bc81034`, `bc81035`, `bc81106`, `bc82035`, `bc88029`, `bc88030`, `bcb00003`, `bcb93015`, `bcb93018`, `bcb95088`, `bcc04024`, `bcc04025`, `bcc05001`, `bcc273`, `bcc72`, `bcc73`, `bcc74`, `bcc837`, `bcc838`, `bcc839`
 - Rolls at `disputed`: none
 - `bc5xxx` rolls flown 1975-76, **review each by eye**: `bc5674`, `bc5675`
 
@@ -60,9 +60,9 @@ Generated 2026-09-26
 
 |rejected_reason      | frames|
 |:--------------------|------:|
-|footprint_misses_aoi |    672|
+|footprint_misses_aoi |    662|
 |no_thumbnail_url     |      7|
-|selected             |    161|
+|selected             |    171|
 
 Rejection reasons:
 
