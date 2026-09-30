@@ -12,9 +12,9 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 
 ## Current State
 
-- 10,100 georeferenced thumbnail COGs, 1967–2019, rebuilt under #23 and published 2026-09-27
+- 10,100 georeferenced thumbnail COGs, 1967–2019, rebuilt under #23 (published 2026-09-27) and again on fly 0.19.0 under #36 (published 2026-09-29), where grayscale became Gray + Alpha
 - Two regions: Neexdzii Kwa watershed (9,824) and three small southeast BC AOIs (276 unique)
-- 31.9 GiB on S3 (`s3://stac-airphoto-bc`); the pre-#23 collection and item JSONs are in `backup/*20260927T003819*`
+- 33.2 GiB of thumbnails on S3 (`s3://stac-airphoto-bc`, measured 2026-09-29). The pre-#23 collection and item JSONs are in `backup/*20260927T003819*`, the pre-#36 ones in `backup/*20260929T063100*`
 - Registered on pgstac via `images.a11s.one`
 - GDAL metadata tags embedded in each COG (visible in QGIS)
 - STAC item titles: `airp_id — roll_frame — date`
@@ -73,7 +73,7 @@ Registration on geopro (separate step, after the sync, over the tailnet as
 `collection.json` and every item it links, audits them all (collection id, count, a
 `thumbnail` asset on each), and only then upserts the collection and then the items:
 ```bash
-cd ~/Projects/repo/stac_dem_bc
+cd ~/Projects/repo/stac_dem_bc   # on this machine, not geopro, which has no checkout
 ( export STAC_COLLECTION=stac-airphoto-bc \
     STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
     STAC_REQUIRE_ASSET=thumbnail
@@ -84,7 +84,10 @@ cd ~/Projects/repo/stac_dem_bc
 lacks and never refreshes an id already there. Every rebuild here rewrites existing
 ids (#23 rewrote all of them), and pgstac would keep their old properties and
 checksums while `--verify`, which compares ids too, still passes (stac_dem_bc#45:
-nothing checks content). The subshell keeps
+nothing checks content). Run it from `stac_dem_bc`'s `origin/main`. If that checkout is on a feature branch,
+use `git worktree add --detach <tmp> origin/main` rather than switching someone's tree,
+and set `PYTHON=~/Projects/repo/stac_dem_bc/.venv/bin/python`, because the script
+looks for `.venv` relative to where it runs (#36, 2026-09-29). The subshell keeps
 the variables out of the shell, where a later `catalogue_register.sh` meant for the
 DEM collection would silently act on this one.
 Not rtj's `stac_register-pypgstac.sh`: it DELETEs the collection before reloading, and
@@ -244,14 +247,6 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
   fly adds another, and `tests/test_aoi.R` fails when the installed fly adds one
   nobody declared. `01_fetch.R` aborts on any `dem_shortfall_m > 0` among selected
   frames, since the cached DEM is otherwise reused as-is.
-- **The published COGs are wrong in three ways until the #23 rebuild is
-  published.** Rotation was guessed per frame from bearing (it is a per-roll
-  constant); film was sized without terrain (fitted scale 0.909 against
-  orthophotos) and 2012 digital as 9-inch negatives (`bcd12008` ships 11,435 m;
-  the photogrammetric solution says ~5,193 m). And the files themselves: the old
-  `terra::writeRaster(filetype = "COG")` set NoData=255 and dropped colour
-  interpretation (an RGBA frame's alpha-masked interior reads as nodata), and
-  in-place tagging broke the COG layout.
 - **Rotation is a per-roll constant, supplied as a column, and that deliberately
   disarms fly's refusal.** fly 0.9+ rotates each footprint onto its flight line
   and refuses a film frame without its roll's rotation, because the corner
@@ -268,10 +263,6 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
 - **Roll-model placements are carried past what was measured.** Of the 211
   `roll_model` frames on three rolls, 135 lie outside the measured area, where
   the roll's shift is extrapolated along the roll untested.
-- **Published grayscale COGs are the pre-#36 shape until the next sync**: 1 band,
-  `NoData=0`, with interior black written as 1. Once the local tree is rebuilt on
-  fly 0.19.0 (Gray + Alpha), local and S3 differ until `04_s3_upload.R` and the
-  geopro registration run.
 - **`scripts/run_pipeline.sh` and `scripts/test_pipeline.R` both end in the S3
   upload.** Run the stages individually when the result must not be published.
 - **Check the cold path when measuring georeferencing.** A re-run over a
