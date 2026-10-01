@@ -52,6 +52,23 @@ that built it (`nge:fly_version`, `nge:fly_sha`).
 
 Registration runs **before** the sync, so a run uploads its own STAC output.
 
+**Render check, around every sync** (#40). `cog_render-compare.py` draws frames the
+way a GDAL client does, published | local | diff (magenta = differs), so a person can
+see fill as transparent and black as black:
+```bash
+conda run -n stac-airphoto-bc python scripts/cog_render-compare.py [airp_id ...]                # before: what changes, for these frames
+conda run -n stac-airphoto-bc python scripts/cog_render-compare.py --expect-same [airp_id ...]  # after: exit 1 unless byte-identical
+```
+It is a **spot check, not a census**: two frames per band shape, seeded so a re-run
+draws the same ones, plus any ids named. A sync that changes other frames shows
+nothing here, so name the frames the change was about. The whole-collection check
+is still `stac_validate.py`, plus the spot check of checksums in `04_s3_upload.R`.
+For each frame it drew, it compares the bytes (sha256) and counts differing pixels
+at full resolution and at every overview level. A frame not yet published is
+reported, not fatal. Output goes to `data/logs/render/<stamp>/` (PNGs plus
+`summary.csv`); the only things read are the item JSONs, the local COGs and the
+bucket.
+
 Run end-to-end: `bash scripts/run_pipeline.sh [aoi_id ...]`
 
 ### The AOI is a parameter
