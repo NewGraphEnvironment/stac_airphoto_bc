@@ -540,6 +540,12 @@ Assign inside the call, `expect_message(h <- f(x), "msg")`, never `h <- expect_m
 ### `c()` dispatches on its first argument, so `c(NULL, <Date>)` is a plain number
 Put a Date first when `c()` combines an optional piece with Dates: `c(NULL, <Date>)` takes the default method and returns a bare day count.
 
+### `bind_rows()` of all-`NULL` is a 0 x 0 tibble, and a typed template must take its types from the rows' source
+Bind per-group results under a zero-row template so an all-dropped result keeps its columns, and build that template's key columns from the same object the rows are built from (`combos$variable[0]`, not `character()`).
+
+### `sample.int(prob =)` without replacement is not a probability-proportional draw, so weighting its result again double-counts
+Draw a subsample to be design-weighted **uniformly** (`sample.int(n, k)`), or keep every unit.
+
 # Code Check — Shell
 Tool-level traps in bash, sed, git and `gh`, and in the host toolchain those commands depend on.
 
@@ -864,6 +870,21 @@ Read with `promote_to_multi = FALSE` whenever a layer will be written back.
 
 ### `sf::st_make_valid()` rewrites geometry that was already valid
 Run it on the invalid rows only (`!st_is_valid(x)`), or keep the original geometry and use the made-valid copy just for the computation.
+
+### terra: `unique()` and `freq()` on a factor return its labels, not its codes
+Read a factor raster's codes from a copy with its levels stripped (`levels(y) <- NULL`, or `set.cats(y, layer = 1, value = NULL)` on a copy you own), never from `terra::unique(x)[, 1]` or `terra::freq(x)$value`: on a factor both return the active category's labels, so matching …
+
+### A GDAL failure partway through `sf::st_read()` returns the rows read so far, with only a warning
+Treat any warning during a read whose completeness matters as a failed read: wrap it in `withCallingHandlers(st_read(...), warning = function(w) stop(...))`, retry, then stop.
+
+### `terra::project()` over a remote strip-organised TIFF issues a range request per strip, so download it first
+Check `gdalinfo` for `Block=<width>x1` before reading a remote raster through `/vsicurl/`, and where it is strip-organised (one row per block, no overviews) download the whole file to a tempfile and read that.
+
+### LidarBC tiles can carry an undeclared nodata of -3.4e38, which a mean takes as data
+Clamp a LidarBC DEM or DSM to plausible elevations before any aggregate: `terra::clamp(r, -100, 5000, values = FALSE)`.
+
+### bcdata returns a column whose values are all missing as character, not numeric
+Coerce every field you do arithmetic on (`as.numeric(v$PROJ_AGE_1)`) right after `bcdata::collect()`.
 
 # Code Check Conventions
 Structured checklist for reviewing diffs before commit.
