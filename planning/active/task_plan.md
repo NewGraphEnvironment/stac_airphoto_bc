@@ -117,13 +117,13 @@ for this collection was measured 2026-10-06: 10,100 items, in sync.
       collection.json only; returns before any probe), then `--mode drift` without
       `--dryrun` (plan review V1), which probes the API and ssh to geopro and, in sync,
       writes nothing
-- [ ] Record timings and results in `findings.md`
-- [ ] Edit the #42 body: tick the items, note the v0.1.1 pin and why, and state that
+- [x] Record timings and results in `findings.md`
+- [x] Edit the #42 body: tick the items, note the v0.1.1 pin and why, and state that
       stac_dem_bc#49 had already deleted the script this repo pointed at
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
 - [ ] `/planning-archive` on completion

@@ -28,3 +28,4 @@
   source: 79 true, the other 4 are its 3 findings. Mechanism: one body of facts restated
   in eight places from memory; plus "registration" changing meaning in this branch (now
   item generation vs pgstac registration), fixed in `04_s3_upload.R` comments too.
+- Phase 3: #42 body edited (v0.1.1 pin, stac_dem_bc#49 deletion, live check, load path not exercised).
