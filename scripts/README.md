@@ -28,7 +28,7 @@ Rscript scripts/01_fetch.R se_a
 Rscript scripts/02_georef.R se_a
 conda run -n stac-airphoto-bc python scripts/03_cog.py            # global
 conda run -n stac-airphoto-bc python scripts/05_stac_register.py
-Rscript scripts/04_s3_upload.R              # AFTER registration, not before
+Rscript scripts/04_s3_upload.R              # AFTER 05_stac_register.py, not before
 
 # A full rebuild (#23): fail if any published item was not rebuilt locally
 conda run -n stac-airphoto-bc python scripts/05_stac_register.py --require-all-published --out /tmp/dry
@@ -64,7 +64,7 @@ To add an area, add an entry to `aoi_registry()`. Nothing else changes.
 | — | `cog_render-compare.py` | The render check, a spot check run before and after a sync. It draws a seeded sample of frames (two per band shape, plus any `airp_id`s named) the way a GDAL client does: alpha over a checkerboard, so fill shows as checkerboard and black stays black. Each frame's PNG shows published, local and a diff, with differing pixels in magenta. Per frame it compares the bytes and counts differing pixels at full resolution and at every overview level. `--expect-same` exits 1 on any difference. The PNGs and `summary.csv` go to `data/logs/render/<stamp>/` |
 | — | `../data-raw/tables_import-georef_validate.R` | Imports the measured per-roll rotation and per-frame placement tables from the private validation repo into `data-raw/rotation_roll.csv` and `data-raw/placement_frame.csv`, stamped with the source commit |
 | — | `airphoto_props.py` | Turns a catalogue row into `airphoto:` item properties and `metadata`-role assets. Imported by both step 5 and the backfill so the two cannot disagree; not run directly |
-| — | `../tests/` | Unit tests. `test_airphoto_props.py` covers the two coercions that fail silently (`Y`/`N` to boolean, and the `0` sentinel); `test_cog.py` the single-write COG stage (shift, alpha and nodata kept, overviews carry the alpha, only a GeoTIFF whose image bands are all masked by a trailing alpha written, layout, determinism) — `conda run -n stac-airphoto-bc pytest tests/ -q`. `test_render.py` checks that the render check's fill, black and diff panels show what they claim. `test_aoi.R` covers the guards in `aoi.R` that must fail toward abort, and the rotation rule — `Rscript tests/test_aoi.R`. Both from the repo root |
+| — | `../tests/` | Unit tests. `test_airphoto_props.py` covers the two coercions that fail silently (`Y`/`N` to boolean, and the `0` sentinel); `test_cog.py` the single-write COG stage (shift, alpha and nodata kept, overviews carry the alpha, only a GeoTIFF whose image bands are all masked by a trailing alpha written, layout, determinism) — `conda run -n stac-airphoto-bc pytest tests/ -q`. `test_render.py` checks that the render check's fill, black and diff panels show what they claim. `test_stacs_config.py` pins `stacs.toml` to `05_stac_register.py` and the installed stacs to its tag, and runs `stacs audit` over items shaped like ours. `test_aoi.R` covers the guards in `aoi.R` that must fail toward abort, and the rotation rule — `Rscript tests/test_aoi.R`. Both from the repo root |
 | — | `test_pipeline.R` | Run a 100-photo sample through the full pipeline to verify everything works after code changes |
 
 ## Backfilling items published before a metadata change
@@ -96,7 +96,8 @@ Two things worth knowing before you use `--limit`:
   validator prints `VACUOUS:` when this happens rather than letting a green
   partial run read as evidence.
 - The sync is not the end. pgstac still holds the old items until the collection
-  is re-registered with `catalogue_register.sh --all` (After the Pipeline, below).
+  is re-registered with `stacs register --config stacs.toml --mode all` (After the
+  Pipeline, below).
 
 ### Property casing, because pgstac `=` is case-sensitive
 
@@ -218,44 +219,46 @@ code.
 | Component | What's needed |
 |-----------|---------------|
 | R packages | `fly`, `fresh`, `flooded`, `terra`, `sf`, `dplyr`, `arrow`, `purrr`. No fly version is pinned — `aoi_require_fly()` asserts that `dem` reaches `fly_filter()`, `fly_footprint()` and `fly_georef()`, which is the capability the pipeline depends on. Take the latest fly. |
-| Python (conda) | Environment `stac-airphoto-bc` with `pystac`, `rasterio`, `shapely`, `pyarrow` |
-| geopro | For the registration step: tailnet SSH to `root@geopro`, and a [`stac_dem_bc`](https://github.com/NewGraphEnvironment/stac_dem_bc) checkout at `~/Projects/repo/stac_dem_bc` with a Python that imports its `scripts/` modules — its `.venv` (gitignored, so build it on a new machine), its `stac-catalog` conda env activated, or `PYTHON=` set to an interpreter's full path (`$(conda info --base)/envs/stac-catalog/bin/python`; a directory or a bare `python` does not work). Without one the orchestrator exits 1 blaming the working directory. |
+| Python (conda) | Environment `stac-airphoto-bc` with `pystac`, `rasterio`, `shapely`, `pyarrow`, and [`stacs`](https://github.com/NewGraphEnvironment/stacs) at the tag `environment.yml` pins |
+| geopro | For pgstac registration: tailnet SSH to `root@geopro` with a key that logs in non-interactively. stacs runs on this machine and loads through `pypgstac` on the host; the database password stays there |
 | AWS CLI | Configured with write access to `s3://stac-airphoto-bc` |
 
 ## After the Pipeline
 
-The pipeline produces COGs on S3 and STAC catalog files on disk. To make the collection searchable at `images.a11s.one`, register it on the pgstac server with `stac_dem_bc`'s orchestrator, after the S3 sync:
+The pipeline produces COGs on S3 and STAC catalog files on disk. To make the collection searchable at `images.a11s.one`, register it into pgstac with [`stacs`](https://github.com/NewGraphEnvironment/stacs), after the S3 sync, from the repo root:
 
 ```bash
-cd ~/Projects/repo/stac_dem_bc
-( export STAC_COLLECTION=stac-airphoto-bc \
-    STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
-    STAC_REQUIRE_ASSET=thumbnail
-  bash scripts/catalogue_register.sh --all &&
-  bash scripts/catalogue_register.sh --verify )
+conda run --no-capture-output -n stac-airphoto-bc stacs register --config stacs.toml --mode all
+conda run --no-capture-output -n stac-airphoto-bc stacs verify   --config stacs.toml
 ```
 
-It reads the **published** `collection.json`, fetches every item it links, and
-audits all of them (collection id, count, a `thumbnail` asset on each) before
-anything reaches the database; then it upserts the collection, then the items.
-Nothing is deleted.
+`stacs.toml` declares the catalogue: the API, the collection id, the bucket, the
+`thumbnail` asset every item must carry, and the STAC host it writes through.
+`register` reads the **published** `collection.json`, fetches every item it links,
+and audits every item it will send (collection id, the `thumbnail` asset, no id
+twice; under `--mode all`, every item) before
+anything reaches the database; then it upserts the collection, then the items, and
+checks the API serves the bodies it sent. Nothing is deleted.
 
-Use `--all`, not `--drift`. Drift compares id sets, so it registers only ids the
-API lacks and never refreshes an item already registered — and a rebuild here
-rewrites existing items' properties and checksums. `--verify` compares ids too, so
-it cannot see a stale item either; nothing in the chain compares content yet
-([stac_dem_bc#45](https://github.com/NewGraphEnvironment/stac_dem_bc/issues/45)).
-The subshell keeps the variables out of your shell, where a later
-`catalogue_register.sh` meant for the DEM collection would act on this one.
+`--mode all` re-sends every item. `--mode drift` compares each published body with
+the one the API serves, by digest, and sends the collection and only the missing and
+the different items, so it does refresh items a rebuild rewrote; use it when a run
+touched few. `verify`
+makes the same comparison in both directions, changes nothing, and is the one that
+fails on orphans (ids registered but no longer published); `--out-dir` writes the
+id lists. `--dryrun` on `--mode all` reads `collection.json` only and probes neither
+the API nor the host.
 
 The merged collection is still load-bearing, as the set everything is compared
 against: a `collection.json` listing only the newest AOI would register just that
-AOI and `--verify` would report every other item as orphaned. `05_stac_register.py`
-asserts against the written file that no published link was dropped, and refuses
-to promote a collection that fails.
+AOI and `stacs verify` would report every other item as orphaned.
+`05_stac_register.py` asserts against the written file that no published link was
+dropped, and refuses to promote a collection that fails.
 
 Do not use `stac_register-pypgstac.sh`: it deletes the collection before
 reloading, and a failure between the two leaves the API empty.
+
+Registering loads the STAC records into the PostgreSQL database that powers the search API. Once registered, the collection is available in QGIS (via the STAC Data Source Manager), through the API at `images.a11s.one`, or any STAC-compatible client.
 
 ### Building the conda environment
 
@@ -266,10 +269,12 @@ Nothing here needs it — build from conda-forge explicitly instead:
 
 ```bash
 conda create -n stac-airphoto-bc -c conda-forge --override-channels python=3.12 pip -y
-conda run -n stac-airphoto-bc pip install pystac rio-stac rasterio shapely pyarrow tqdm jsonschema
+conda run -n stac-airphoto-bc pip install pystac rio-stac rasterio shapely pyarrow tqdm jsonschema pytest \
+  "stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.1"
 ```
 
-This loads the STAC records into a PostgreSQL database that powers the search API. Once registered, the collection is available in QGIS (via the STAC Data Source Manager), through the API at `images.a11s.one`, or any STAC-compatible client.
+The stacs tag here and in `environment.yml` must agree; `tests/test_stacs_config.py`
+fails when they do not.
 
 ## Embedded Image Metadata
 

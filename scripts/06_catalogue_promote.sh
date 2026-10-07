@@ -34,7 +34,7 @@
 # More importantly it fixes `collection.json`. `04_s3_upload.R` syncs every
 # `*.json` in `data/stac`, and `collection.json` is one of them — so a stale
 # local copy would be pushed over the published collection, which
-# `catalogue_register.sh` then reads to register pgstac. `05_stac_register.py`
+# `stacs register` then reads to register pgstac. `05_stac_register.py`
 # FETCHES the published collection and merges into it, refusing to shrink it, so
 # running it immediately before the sync makes the local file provably derived
 # from the live one. That is a stronger guarantee than excluding the file from
@@ -105,17 +105,12 @@ Rscript scripts/04_s3_upload.R
 cat <<'EOF'
 
 Synced. The new properties are on S3 but NOT yet queryable: pgstac still holds
-the old items. Re-register on geopro to make them searchable (upsert; nothing
-is deleted):
+the old items. Register them to make them searchable (upsert; nothing is
+deleted). From the repo root; stacs reaches the STAC host over ssh:
 
-  cd ~/Projects/repo/stac_dem_bc
-  ( export STAC_COLLECTION=stac-airphoto-bc \
-      STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
-      STAC_REQUIRE_ASSET=thumbnail
-    bash scripts/catalogue_register.sh --all &&
-    bash scripts/catalogue_register.sh --verify )
+  conda run --no-capture-output -n stac-airphoto-bc stacs register --config stacs.toml --mode all
+  conda run --no-capture-output -n stac-airphoto-bc stacs verify   --config stacs.toml
 
---all, not --drift: every item here already exists in pgstac, and drift only
-registers ids the API lacks. `--verify` compares ids too, so it cannot confirm
-the new properties landed; nothing checks content yet (stac_dem_bc#45).
+--mode all because the backfill rewrote every item it touched. verify compares
+every body with what the API serves, so it confirms the new properties landed.
 EOF

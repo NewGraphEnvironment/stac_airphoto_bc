@@ -55,10 +55,14 @@ def test_the_pinned_stacs_is_the_one_installed():
     assert direct["vcs_info"]["requested_revision"] == f"v{STACS_VERSION}"
 
 
-def test_environment_yml_pins_the_same_tag():
-    """Every pin in the file, whole: a substring test would pass `v0.1.10`."""
+def test_every_install_path_pins_the_same_tag():
+    """environment.yml and the conda recipe in scripts/README.md each install stacs; a
+    bump in one only would build one version on one machine and another elsewhere.
+    Every pin in each file, whole: a substring test would pass `v0.1.10`."""
     pin = re.compile(r"stacs@v([0-9][0-9A-Za-z.\-]*[0-9A-Za-z])")
-    assert pin.findall((ROOT / "environment.yml").read_text()) == [STACS_VERSION]
+    for rel in ("environment.yml", "scripts/README.md"):
+        assert pin.findall((ROOT / rel).read_text()) == [STACS_VERSION], \
+            f"{rel} does not pin v{STACS_VERSION}"
 
 
 def test_collection_id_is_the_modules(cfg):

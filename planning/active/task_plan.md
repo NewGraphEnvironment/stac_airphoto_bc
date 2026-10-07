@@ -71,38 +71,38 @@ for this collection was measured 2026-10-06: 10,100 items, in sync.
 - [x] `conda run -n stac-airphoto-bc pytest tests/ -q` is green
 
 ## Phase 2: Registration commands and docs
-- [ ] `scripts/run_pipeline.sh` heredoc: replace the `cd` block with
+- [x] `scripts/run_pipeline.sh` heredoc: replace the `cd` block with
       `conda run --no-capture-output -n stac-airphoto-bc stacs register --config stacs.toml --mode all`
       followed by the same with `stacs verify --config stacs.toml`, run from the repo
       root. Correct the note: `--mode drift` compares bodies (stac_dem_bc#45, now stacs), so
       it does refresh rebuilt items. `all` is the routine and drift is a valid alternative
-- [ ] `CLAUDE.md`:
+- [x] `CLAUDE.md`:
       - Pipeline section: replace the stac_dem_bc block (subshell and env vars, the
         `--all`-vs-`--drift` paragraph, the worktree/`PYTHON=` advice) with the stacs
         commands and a pointer to `stacs.toml`
       - Known issues: retarget the pypgstac warning's "Register with … instead"
       - Architecture: one line that registration is `stacs`, pinned in `environment.yml`
-- [ ] `scripts/README.md`:
+- [x] `scripts/README.md`:
       - Prerequisites: the geopro row becomes tailnet ssh to `root@geopro` plus stacs in
         the conda env. The stac_dem_bc checkout and `.venv` requirement is dropped
       - "After the Pipeline": the stacs commands. The merged collection stays
         load-bearing. Drop the id-set-only claims
       - Line ~99: `catalogue_register.sh --all` becomes `stacs register --mode all`
       - The conda build recipe gains the stacs pip line
-- [ ] `scripts/06_catalogue_promote.sh` (plan review G1): its closing heredoc is a second copy
+- [x] `scripts/06_catalogue_promote.sh` (plan review G1): its closing heredoc is a second copy
       of the broken stac_dem_bc block. Replace it with the same stacs commands; rewrite the
       note (verify now compares bodies); line 37's `catalogue_register.sh` becomes `stacs register`
-- [ ] Wording (G4): `CLAUDE.md` "Registration runs **before** the sync" means item generation
+- [x] Wording (G4): `CLAUDE.md` "Registration runs **before** the sync" means item generation
       (`05_stac_register.py`); call the stacs step "pgstac registration". The heredoc's
       "Register on geopro" runs on this machine and reaches geopro over ssh
-- [ ] Say why `stacs verify` follows `register --mode all` (S1): register ignores orphans,
+- [x] Say why `stacs verify` follows `register --mode all` (S1): register ignores orphans,
       verify fails on them and writes id lists with `--out-dir`
-- [ ] Pin test covers the README conda recipe too (G3), so a bump in one install path alone
+- [x] Pin test covers the README conda recipe too (G3), so a bump in one install path alone
       fails; the recipe also gains `pytest` (missing today). Mutation: README pin bumped alone
-- [ ] Widened grep (G2), expect no hits outside `planning/`:
+- [x] Widened grep (G2), expect no hits outside `planning/`:
       `catalogue_register|STAC_(COLLECTION|BUCKET_URL|REQUIRE_ASSET)|orchestrator|stac_dem_bc#45|--drift|--verify|PYTHON=|compares? (ids|id sets)|nothing (checks|compares) content`
-- [ ] `bash -n` on `run_pipeline.sh` and `06_catalogue_promote.sh`
-- [ ] Leave the build side alone: `05_stac_register.py` (except the constant),
+- [x] `bash -n` on `run_pipeline.sh` and `06_catalogue_promote.sh`
+- [x] Leave the build side alone: `05_stac_register.py` (except the constant),
       `stac_validate.py`, `06_catalogue_validate.py`. The `"thumbnail"` literals in
       `stac_validate.py` and `cog_render-compare.py` stay (G5): a rename that missed them
       fails loudly, every item refused. `test_pipeline.R` stays as is (S2): it ends at the

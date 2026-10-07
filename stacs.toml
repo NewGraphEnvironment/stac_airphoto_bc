@@ -1,5 +1,5 @@
-# This catalogue, declared for stacs (#42):
-#   stacs register|verify|audit --config stacs.toml
+# This catalogue, declared for stacs (#42). stacs register, verify and audit read it with
+# `--config stacs.toml`; the commands to run are in CLAUDE.md and scripts/README.md.
 #
 # The catalogue values also live in scripts/05_stac_register.py -- the collection id in
 # COLLECTION_ID, the bucket URL in S3_BASE, the asset key in ASSET_THUMBNAIL -- and

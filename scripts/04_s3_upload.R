@@ -1,7 +1,7 @@
 # 04_s3_upload.R — back up the published collection, then sync to S3
 #
 # Runs AFTER 05_stac_register.py, so the item JSONs and collection.json that
-# registration just wrote are included. It used to run before, which meant a
+# 05_stac_register.py just wrote are included. It used to run before, which meant a
 # run's own STAC output was never uploaded by that run.
 
 BUCKET <- "stac-airphoto-bc"
@@ -22,8 +22,8 @@ run <- function(cmd) {
 # --- Refuse to upload anything that does not check out ---------------------
 # The checksums, the named provenance set, the tags against the properties and
 # the COG layout, recomputed from the bytes on disk immediately before they are
-# uploaded (#30). Registration runs the same checks, but a publish can come days
-# after registering, and a file touched in between would otherwise ship with a
+# uploaded (#30). 05_stac_register.py runs the same checks, but a publish can come
+# days after it, and a file touched in between would otherwise ship with a
 # checksum that describes something else.
 
 run("conda run --no-capture-output -n stac-airphoto-bc python scripts/stac_validate.py")
