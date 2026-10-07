@@ -32,56 +32,55 @@ locked env that matches the siblings, with no change to any COG byte or item bod
   later reads it as a code change.
 
 ## Phase 1: Measure — the conda baseline, then the uv env, before switching anything
-- [ ] Record the conda env's `pip freeze` and `rasterio.__gdal_version__` in `findings.md`
-- [ ] `conda run -n stac-airphoto-bc pytest tests/ -q`: baseline pass count
-- [ ] Write `pyproject.toml`: `[tool.uv] package = false`, `requires-python = ">=3.11"`, the
-      same dependency floors as `environment.yml`, `pytest` in a `dev` dependency group, and
-      stacs via `[tool.uv.sources] stacs = { git = …, tag = "v0.1.1" }` (stacs README, "Install")
-- [ ] `uv lock`, then hold each drifted package to the conda version with
-      `uv lock --upgrade-package <pkg>==<ver>` until `uv export` matches the freeze (diff
-      recorded). Python 3.12, matching the conda env (`.python-version`)
-- [ ] `uv run pytest tests/ -q`: same pass count as under conda. If the stacs pin test
-      fails on `direct_url.json` under uv, that's expected and Phase 2 handles it
-- [ ] A/B writer census (scratch script, results in `findings.md`). Under both envs, for every
-      frame: `write_cog(georef_tif, tags read off the local COG, shift from its tags)` → sha256,
-      compared with the local COG's sha256. Pass means 10,100 / 10,100 identical under uv
-- [ ] Reader side: `uv run python scripts/cog_render-compare.py --expect-same` on the default
-      spot-check sample plus a few named ids, gray and RGB (exit 0)
-- [ ] Commit the env files and findings (`pyproject.toml`, `uv.lock`, `.python-version`,
+- [x] Record the conda env's `pip freeze` and `rasterio.__gdal_version__` in `findings.md`
+- [x] `conda run -n stac-airphoto-bc pytest tests/ -q`: baseline pass count (87)
+- [x] Write `pyproject.toml`: `[tool.uv] package = false`, `requires-python = ">=3.12"`
+      (not 3.11: a 3.11 floor forks rasterio to 1.4.4, see findings), the same dependency
+      floors as `environment.yml`, `pytest` in a `dev` group, stacs via
+      `[tool.uv.sources] stacs = { git = …, tag = "v0.1.1" }`
+- [x] `uv lock`, then hold each drifted package to the conda version with
+      `uv lock --upgrade-package <pkg>==<ver>` until `uv export` matches the freeze. Python 3.12
+      (`.python-version`)
+- [x] `uv run pytest tests/ -q`: 87, same as conda
+- [x] A/B writer census: 10,100 / 10,100 identical under both envs, identical CSVs; positive
+      control (tag edited, shift +0.5 m) reports "differs"
+- [x] Render spot check under uv (`--expect-same`, 5 frames) exits 0. Plan review: this compares
+      bytes already written, so it is no env check; `stac_validate.py` replaces it (Phase 2)
+- [x] Commit the env files and findings (`pyproject.toml`, `uv.lock`, `.python-version`,
       `.gitignore` gets `.venv/`)
 
 ## Phase 2: Switch — every call site, the pin test, delete `environment.yml`
-- [ ] `tests/test_stacs_config.py`: `test_every_install_path_pins_the_same_tag` reads the stacs
-      tag from `pyproject.toml` `[tool.uv.sources]` (via `tomllib`) and from `uv.lock`'s source
-      URL. Each must be whole: `v0.1.10` must not pass for `v0.1.1`.
-      `test_the_pinned_stacs_is_the_one_installed`: keep its `requested_revision` check if uv
-      records it, otherwise check `commit_id` against the commit `uv.lock` resolved. Restore the
-      bug (bump one pin only) and watch the test go red
-- [ ] `conda run [--no-capture-output] -n stac-airphoto-bc` → `uv run` in `scripts/run_pipeline.sh`,
-      `scripts/06_catalogue_promote.sh` (`CONDA_RUN`→`UV_RUN`), `scripts/04_s3_upload.R`,
-      `scripts/test_pipeline.R`, and the usage docstrings of every `scripts/*.py` and `tests/*.py`.
-      Fix `run_pipeline.sh`'s pipefail comment, which names conda run
-- [ ] Delete `environment.yml`. `scripts/README.md`: Prerequisites row → uv. Replace "Building
-      the conda environment" (the ToS recipe) with `uv sync`. Update the stacs command blocks
-- [ ] `CLAUDE.md`: Primary Language line, render-check and stacs command blocks, the pin note
-      ("pinned to a tag in `environment.yml`" → `pyproject.toml`)
-- [ ] `grep -rn conda` over the repo shows only the soul-generated code-check index lines and
-      `planning/archive/`
-- [ ] Re-run `uv run pytest tests/ -q` and `Rscript tests/test_aoi.R`. Smoke test: run
-      `uv run stacs verify --config stacs.toml` live, read-only. It fails on orphans, so it
-      shows registration still works from the uv env
+- [ ] `tests/test_stacs_config.py`: the pin test reads the tag from `pyproject.toml`
+      `[tool.uv.sources]` and `uv.lock` (whole-string), the install test also checks
+      `commit_id` against the lock's; each mutation (pyproject tag, lock tag, lock commit) turns
+      one test red, in a copy of the tree
+- [ ] `conda run … -n stac-airphoto-bc` → `uv run` everywhere; `uv run --locked` at the pipeline
+      call sites (`run_pipeline.sh`, `04_s3_upload.R`, `test_pipeline.R`, `06_catalogue_promote.sh`
+      `UV_RUN`) so a hand edit to `pyproject.toml` cannot re-resolve mid-run. Usage docstrings in
+      `scripts/*.py`, `tests/*.py`
+- [ ] Commit the census as `scripts/cog_rewrite-check.py`: the writer check an upgrade needs,
+      which the README's upgrade paragraph points at
+- [ ] Delete `environment.yml`; `scripts/README.md` Prerequisites + "Building the Python
+      environment" (claim scoped to macOS arm64 / cp312); `CLAUDE.md`
+- [ ] `git grep -nIiE '\bconda' -- ':!planning'` shows only the allowed hits
+- [ ] Item bodies: `05_stac_register.py --out <scratch>` under conda and uv, outputs identical
+- [ ] Read side: `uv run python scripts/stac_validate.py` passes, once through R
+      (`Rscript -e 'q(status = system("uv run --locked python scripts/stac_validate.py"))'`)
+      to exercise R → uv; `uv run --offline` works once synced
+- [ ] `stacs verify --out-dir` under conda and under uv: same exit code, same id lists
+- [ ] `uv run pytest tests/ -q` and `Rscript tests/test_aoi.R` pass
 
 ## Phase 3: Close out
-- [ ] Edit #44's body: correct the GDAL premise and link the census. Update the
-      `stac_airphoto_bc` row in `stac_dem_bc#16`'s rollout table to "migrated"
-- [ ] `/code-check` on each commit, `/planning-archive` (README with the Measurement and
-      Evidence sections), `/gh-pr-push`
+- [ ] Edit #44's body: correct the GDAL premise, record the census
+- [ ] Follow-up issue: `pipeline_sha` does not cover `pyproject.toml`/`uv.lock`, so a lock bump
+      that changes COG bytes leaves provenance unchanged
+- [ ] `/code-check`, `/planning-archive` (README with Measurement and Evidence), `/gh-pr-push`
+- [ ] After merge, not in this PR: set `stac_dem_bc#16`'s `stac_airphoto_bc` row to migrated
 
 ## Not in scope
-- Upgrading rasterio/pystac (a separate issue: bump the lock, then render-check before syncing)
+- Upgrading rasterio/pystac (a separate issue: bump the lock, then `cog_rewrite-check.py`)
 - Removing the conda env from this machine (`conda env remove -n stac-airphoto-bc` stays
   the user's call, after merge)
-
 
 ## Validation
 
