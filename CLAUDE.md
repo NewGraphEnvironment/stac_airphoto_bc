@@ -741,6 +741,9 @@ Supply a default ssh command only when `GIT_SSH_COMMAND`, `core.sshCommand` and 
 ### `conda run` captures its child's output, so a pipe gets nothing
 `conda run -n env cmd` buffers the child's stdout and re-emits it, and that re-emission does not reach a pipe.
 
+### `exit` inside a loop condition ends the shell, not the test
+Count instead: `while :; do left=0; for i in $ids; do done_yet "$i" || left=$((left+1)); done; [ "$left" -eq 0 ] && break; sleep 90; done`.
+
 # Code Check — Spatial
 terra, sf, bcdata, GDAL/OGR CLIs.
 
@@ -949,6 +952,9 @@ Treat a zero-length step as having no heading: test the step length before takin
 
 ### gdalwarp writes INTO an existing destination and keeps its grid
 Delete the output before re-warping to the same path (`unlink(out)` before `sf::gdal_utils("warp", ...)`, or pass `-overwrite`).
+
+### GDAL caches a failed `/vsicurl/` open, so an in-process retry sends no request
+Before retrying a `/vsicurl/` read in the same process, set `CPL_VSIL_CURL_NON_CACHED` to the URL's prefix.
 
 # Code Check Conventions
 Structured checklist for reviewing diffs before commit.
