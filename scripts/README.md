@@ -26,12 +26,12 @@ bash scripts/run_pipeline.sh se_a se_b
 # Or run individual steps from the project root
 Rscript scripts/01_fetch.R se_a
 Rscript scripts/02_georef.R se_a
-conda run -n stac-airphoto-bc python scripts/03_cog.py            # global
-conda run -n stac-airphoto-bc python scripts/05_stac_register.py
+uv run python scripts/03_cog.py            # global
+uv run python scripts/05_stac_register.py
 Rscript scripts/04_s3_upload.R              # AFTER 05_stac_register.py, not before
 
 # A full rebuild (#23): fail if any published item was not rebuilt locally
-conda run -n stac-airphoto-bc python scripts/05_stac_register.py --require-all-published --out /tmp/dry
+uv run python scripts/05_stac_register.py --require-all-published --out /tmp/dry
 ```
 
 ## Areas of interest
@@ -61,10 +61,11 @@ To add an area, add an entry to `aoi_registry()`. Nothing else changes.
 | 4 | `04_s3_upload.R` | Re-check every item against its COG (`stac_validate.py`), back up the published collection and item JSONs, then sync to S3 with SHA-256 checksums and spot-check what arrived |
 | 5 | `05_stac_register.py` | Create a STAC record for each image — location, date, properties, `file:checksum`, provenance — merge into the published collection, and validate |
 | — | `stac_validate.py` | The pre-sync checks: checksum and size against the file, COG layout, COG tags against item properties, the named provenance set, the closed vocabularies |
+| — | `cog_rewrite-check.py` | The writer check for a change to the Python environment (#44). For every local COG it makes `03_cog.py`'s own call, `write_cog()` with `frame_tags()` and `shift_of()` of the frame's window row, in a temp dir, and compares the bytes. It skips 03's guards, the pipeline-SHA refusal among them (run constants, ledger selection, manifest vouching, orphans), none of which changes the bytes written, and it visits existing COGs only. A `differs` is the environment, or an input changed since 03 last wrote the COG: windows rebuilt by 01, a GeoTIFF rewritten by 02, or `03_cog.py` itself; a COG with no window row or no GeoTIFF is an `error:`. Run it right after a `uv lock` upgrade, before any stage runs under the new lock: the local COGs are its reference. Exits 1 unless every COG is the same; per-frame verdicts go to `data/logs/rewrite/<stamp>.csv` |
 | — | `cog_render-compare.py` | The render check, a spot check run before and after a sync. It draws a seeded sample of frames (two per band shape, plus any `airp_id`s named) the way a GDAL client does: alpha over a checkerboard, so fill shows as checkerboard and black stays black. Each frame's PNG shows published, local and a diff, with differing pixels in magenta. Per frame it compares the bytes and counts differing pixels at full resolution and at every overview level. `--expect-same` exits 1 on any difference. The PNGs and `summary.csv` go to `data/logs/render/<stamp>/` |
 | — | `../data-raw/tables_import-georef_validate.R` | Imports the measured per-roll rotation and per-frame placement tables from the private validation repo into `data-raw/rotation_roll.csv` and `data-raw/placement_frame.csv`, stamped with the source commit |
 | — | `airphoto_props.py` | Turns a catalogue row into `airphoto:` item properties and `metadata`-role assets. Imported by both step 5 and the backfill so the two cannot disagree; not run directly |
-| — | `../tests/` | Unit tests. `test_airphoto_props.py` covers the two coercions that fail silently (`Y`/`N` to boolean, and the `0` sentinel); `test_cog.py` the single-write COG stage (shift, alpha and nodata kept, overviews carry the alpha, only a GeoTIFF whose image bands are all masked by a trailing alpha written, layout, determinism) — `conda run -n stac-airphoto-bc pytest tests/ -q`. `test_render.py` checks that the render check's fill, black and diff panels show what they claim. `test_stacs_config.py` pins `stacs.toml` to `05_stac_register.py` and the installed stacs to its tag, and runs `stacs audit` over items shaped like ours. `test_aoi.R` covers the guards in `aoi.R` that must fail toward abort, and the rotation rule — `Rscript tests/test_aoi.R`. Both from the repo root |
+| — | `../tests/` | Unit tests. `test_airphoto_props.py` covers the two coercions that fail silently (`Y`/`N` to boolean, and the `0` sentinel); `test_cog.py` the single-write COG stage (shift, alpha and nodata kept, overviews carry the alpha, only a GeoTIFF whose image bands are all masked by a trailing alpha written, layout, determinism) — `uv run pytest tests/ -q`. `test_render.py` checks that the render check's fill, black and diff panels show what they claim. `test_stacs_config.py` pins `stacs.toml` to `05_stac_register.py` and the installed stacs to its tag, and runs `stacs audit` over items shaped like ours. `test_aoi.R` covers the guards in `aoi.R` that must fail toward abort, and the rotation rule — `Rscript tests/test_aoi.R`. Both from the repo root |
 | — | `test_pipeline.R` | Run a 100-photo sample through the full pipeline to verify everything works after code changes |
 
 ## Backfilling items published before a metadata change
@@ -84,7 +85,7 @@ its coverage and silently not for the rest. These four scripts close that gap
 
 ```bash
 Rscript scripts/06_catalogue_fetch.R
-conda run -n stac-airphoto-bc python scripts/06_catalogue_backfill.py
+uv run python scripts/06_catalogue_backfill.py
 bash scripts/06_catalogue_promote.sh          # or --no-sync to stop before S3
 ```
 
@@ -219,7 +220,7 @@ code.
 | Component | What's needed |
 |-----------|---------------|
 | R packages | `fly`, `fresh`, `flooded`, `terra`, `sf`, `dplyr`, `arrow`, `purrr`. No fly version is pinned — `aoi_require_fly()` asserts that `dem` reaches `fly_filter()`, `fly_footprint()` and `fly_georef()`, which is the capability the pipeline depends on. Take the latest fly. |
-| Python (conda) | Environment `stac-airphoto-bc` with `pystac`, `rasterio`, `shapely`, `pyarrow`, and [`stacs`](https://github.com/NewGraphEnvironment/stacs) at the tag `environment.yml` pins |
+| Python (uv) | [uv](https://docs.astral.sh/uv/). `pyproject.toml` + `uv.lock` declare `pystac`, `rasterio`, `shapely`, `pyarrow`, and [`stacs`](https://github.com/NewGraphEnvironment/stacs) at the tag `pyproject.toml` pins; `uv run` builds `.venv/` on first use |
 | geopro | For pgstac registration: tailnet SSH to `root@geopro` with a key that logs in non-interactively. stacs runs on this machine and loads through `pypgstac` on the host; the database password stays there |
 | AWS CLI | Configured with write access to `s3://stac-airphoto-bc` |
 
@@ -228,8 +229,8 @@ code.
 The pipeline produces COGs on S3 and STAC catalog files on disk. To make the collection searchable at `images.a11s.one`, register it into pgstac with [`stacs`](https://github.com/NewGraphEnvironment/stacs), after the S3 sync, from the repo root:
 
 ```bash
-conda run --no-capture-output -n stac-airphoto-bc stacs register --config stacs.toml --mode all
-conda run --no-capture-output -n stac-airphoto-bc stacs verify   --config stacs.toml
+uv run stacs register --config stacs.toml --mode all
+uv run stacs verify   --config stacs.toml
 ```
 
 `stacs.toml` declares the catalogue: the API, the collection id, the bucket, the
@@ -260,21 +261,33 @@ reloading, and a failure between the two leaves the API empty.
 
 Registering loads the STAC records into the PostgreSQL database that powers the search API. Once registered, the collection is available in QGIS (via the STAC Data Source Manager), through the API at `images.a11s.one`, or any STAC-compatible client.
 
-### Building the conda environment
-
-`conda env create -f environment.yml` can fail with
-`CondaToSNonInteractiveError` if conda's global config still resolves the
-`defaults` channel, whose Terms of Service must be accepted interactively.
-Nothing here needs it — build from conda-forge explicitly instead:
+### Building the Python environment
 
 ```bash
-conda create -n stac-airphoto-bc -c conda-forge --override-channels python=3.12 pip -y
-conda run -n stac-airphoto-bc pip install pystac rio-stac rasterio shapely pyarrow tqdm jsonschema pytest \
-  "stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.1"
+uv sync    # or let the first `uv run` do it
 ```
 
-The stacs tag here and in `environment.yml` must agree; `tests/test_stacs_config.py`
-fails when they do not.
+`uv.lock` pins every package, rasterio included, and rasterio's PyPI wheel bundles
+the GDAL that writes the COGs. It holds the versions the conda environment had when
+the published collection was built (rasterio 1.5.1, GDAL 3.12.4), and under it
+`03_cog.py`'s writer reproduced all 10,100 local COGs byte for byte (#44). That was
+measured with the macOS arm64 / CPython 3.12 wheel (`.python-version`); the lock names
+other platforms' wheels too, and those are different binaries, never compared.
+
+Upgrade a package as its own change (`uv lock --upgrade-package <pkg>`), then run
+`uv run python scripts/cog_rewrite-check.py` **before any stage runs under the new
+lock**: it rewrites every local COG from its GeoTIFF and its window row, as 03 does, in
+a temp dir, and reports any whose bytes would change. A new GDAL can rewrite every COG,
+and the sync would re-upload them. The local COGs are its reference, so once 03 has run
+under the new lock they are the new env's output and the check passes against itself;
+a lock-only bump does not move `pipeline_sha` (#45), so 03 does not refuse to run.
+`cog_render-compare.py` cannot see this either: it compares files already written.
+The rewrite check covers COGs only. For the item JSON (a pystac bump, say), run
+`uv run python scripts/05_stac_register.py --out <scratch dir>` and compare it with
+`data/stac`, likewise before 05 runs under the new lock.
+
+The stacs tag in `pyproject.toml` and the one `uv.lock` resolved must agree;
+`tests/test_stacs_config.py` fails when they do not.
 
 ## Embedded Image Metadata
 

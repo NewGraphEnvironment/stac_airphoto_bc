@@ -10,7 +10,7 @@ These cover the two coercions that can fail silently:
     consumers therefore test for absence.
 
 Run:
-    conda run -n stac-airphoto-bc pytest tests/ -q
+    uv run pytest tests/ -q
 """
 
 import sys

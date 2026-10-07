@@ -50,29 +50,29 @@ locked env that matches the siblings, with no change to any COG byte or item bod
       `.gitignore` gets `.venv/`)
 
 ## Phase 2: Switch — every call site, the pin test, delete `environment.yml`
-- [ ] `tests/test_stacs_config.py`: the pin test reads the tag from `pyproject.toml`
+- [x] `tests/test_stacs_config.py`: the pin test reads the tag from `pyproject.toml`
       `[tool.uv.sources]` and `uv.lock` (whole-string), the install test also checks
       `commit_id` against the lock's; each mutation (pyproject tag, lock tag, lock commit) turns
       one test red, in a copy of the tree
-- [ ] `conda run … -n stac-airphoto-bc` → `uv run` everywhere; `uv run --locked` at the pipeline
+- [x] `conda run … -n stac-airphoto-bc` → `uv run` everywhere; `uv run --locked` at the pipeline
       call sites (`run_pipeline.sh`, `04_s3_upload.R`, `test_pipeline.R`, `06_catalogue_promote.sh`
       `UV_RUN`) so a hand edit to `pyproject.toml` cannot re-resolve mid-run. Usage docstrings in
       `scripts/*.py`, `tests/*.py`
-- [ ] Commit the census as `scripts/cog_rewrite-check.py`: the writer check an upgrade needs,
+- [x] Commit the census as `scripts/cog_rewrite-check.py`: the writer check an upgrade needs,
       which the README's upgrade paragraph points at
-- [ ] Delete `environment.yml`; `scripts/README.md` Prerequisites + "Building the Python
+- [x] Delete `environment.yml`; `scripts/README.md` Prerequisites + "Building the Python
       environment" (claim scoped to macOS arm64 / cp312); `CLAUDE.md`
-- [ ] `git grep -nIiE '\bconda' -- ':!planning'` shows only the allowed hits
-- [ ] Item bodies: `05_stac_register.py --out <scratch>` under conda and uv, outputs identical
-- [ ] Read side: `uv run python scripts/stac_validate.py` passes, once through R
+- [x] `git grep -nIi conda -- ':!planning'` shows only the allowed hits (`\b` in `git grep -E` matched nothing here, so that form could not fail)
+- [x] Item bodies: `05_stac_register.py --out <scratch>` under conda and uv, outputs identical
+- [x] Read side: `uv run python scripts/stac_validate.py` passes, once through R
       (`Rscript -e 'q(status = system("uv run --locked python scripts/stac_validate.py"))'`)
       to exercise R → uv; `uv run --offline` works once synced
-- [ ] `stacs verify --out-dir` under conda and under uv: same exit code, same id lists
-- [ ] `uv run pytest tests/ -q` and `Rscript tests/test_aoi.R` pass
+- [x] `stacs verify --out-dir` under conda and under uv: same exit code, same id lists
+- [x] `uv run pytest tests/ -q` and `Rscript tests/test_aoi.R` pass
 
 ## Phase 3: Close out
 - [ ] Edit #44's body: correct the GDAL premise, record the census
-- [ ] Follow-up issue: `pipeline_sha` does not cover `pyproject.toml`/`uv.lock`, so a lock bump
+- [x] Follow-up issue #45: `pipeline_sha` does not cover `pyproject.toml`/`uv.lock`, so a lock bump
       that changes COG bytes leaves provenance unchanged
 - [ ] `/code-check`, `/planning-archive` (README with Measurement and Evidence), `/gh-pr-push`
 - [ ] After merge, not in this PR: set `stac_dem_bc#16`'s `stac_airphoto_bc` row to migrated

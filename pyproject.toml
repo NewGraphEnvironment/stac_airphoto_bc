@@ -11,7 +11,7 @@ dependencies = [
     # The PyPI wheel, which bundles its own GDAL, as it was under conda (#44). That GDAL
     # writes the COG bytes every `file:checksum` describes, so uv.lock holds rasterio at
     # the version that built the published collection; a bump is its own change, checked
-    # with `cog_render-compare.py --expect-same` before any sync.
+    # with `uv run python scripts/cog_rewrite-check.py` before any stage runs on it.
     "rasterio>=1.4.0",
     "shapely",
     "pyarrow",

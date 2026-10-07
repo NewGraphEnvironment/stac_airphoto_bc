@@ -100,7 +100,9 @@ byte-identical (sha256 `6500a5d8…`) in both envs and that neither env sets `GD
 - the R → uv path is exercised through `stac_validate.py`, which uploads nothing
 - `stacs verify` is compared under both envs rather than read as pass/fail
 - the census is committed as a tool, because the upgrade path otherwise has no writer
-  check: `03_cog.py` refuses to run until 01/02 restamp the windows
+  check that keeps its reference: `03_cog.py` overwrites the COGs it would be compared
+  against. (Its refusal of these windows is this branch's situation, not a property of
+  a lock bump: a lock-only change does not move `pipeline_sha`, #45; code-check round 3.)
 - the README's "the lock fixes the bytes" is scoped to macOS arm64 / cp312
 - `stac_dem_bc#16` is updated after merge, not before
 - follow-up issue: `pipeline_sha` ignores the lock
@@ -108,8 +110,62 @@ byte-identical (sha256 `6500a5d8…`) in both envs and that neither env sets `GD
 `06_catalogue_promote.sh` cannot reach its `$UV_RUN` lines today: it exits early because
 every item already carries `file:checksum`. The rename is untested and is reported as such.
 
+## Phase 2 checks (2026-10-07)
+
+| check | conda | uv |
+|---|---|---|
+| `scripts/cog_rewrite-check.py` (committed census) | — | 10,100 same, 0 not (16:56:09 to 17:08:27; `data/logs/rewrite/20261007T170827Z.csv`) |
+| `05_stac_register.py --out <scratch>` | exit 0 | exit 0 |
+| … the two output trees | identical (`diff -rq`) | |
+| … uv's 10,100 items + `collection.json` vs `data/stac` | | 0 differ |
+| `stacs verify --out-dir` | exit 0, IN SYNC 10,100 | exit 0, IN SYNC 10,100; id lists identical |
+| `stac_validate.py` via `Rscript -e 'q(status = system("uv run --locked …"))'` | | 10,100 of 10,100 pass, R exit 0; control `SystemExit(3)` → R exit 3 |
+| `uv run --offline --locked` | | imports rasterio and stacs |
+| `pytest tests/` | 87 passed | 87 passed |
+| `Rscript tests/test_aoi.R` | | all assertions passed |
+
+`05`'s items carry `nge:pipeline_sha` from the windows (`e16dd5307f57`), not from the
+current code, which is why they compare equal to `data/stac` despite this branch moving
+the code SHA.
+
+`06_catalogue_promote.sh` still was not run: it exits before any `$UV_RUN` line, because
+every item already carries `file:checksum`.
+
+## Code-check rounds 1-2: the rewrite check's tags (2026-10-07)
+
+Round 1 found that `cog_rewrite-check.py` read the tags and shift back off each COG, which
+holds the tag text fixed. A pyarrow bump that changed how 03 formats a window value would
+therefore pass, a guard failing toward pass. The tool now makes 03's call:
+`frame_tags(window_row)` and `shift_of(window_row)`. Controls on one frame: scale text
+changed → differs; shift +0.5 m → differs; no window row → error. Full run under uv:
+**10,100 same, 0 not**, 17:15:29 to 17:26:50 (`data/logs/rewrite/20261007T172650Z.csv`).
+The new method was not run under conda; pyarrow is 25.0.1 in both, and the read-back
+census had matched under both.
+
+Round 2 found three documentation defects inside round 1's fix: the `pyproject.toml`
+comment still sent a bump to `--expect-same`, the docstring cited a result the new
+method had not yet produced, and the README understated what the tool skips.
+Enumerated every statement of the tool's coverage or results (pyproject comment,
+CLAUDE.md paragraph, README row, README env section, docstring, findings, #44 body) and
+made each match the code. Each now also says the tool covers COGs only, and that item
+JSON is checked with `05 --out`.
+
+## Code-check round 3: the check's precondition (2026-10-07)
+
+Round 3 named the mechanism behind rounds 1-2: the docs turned this branch's situation
+into a rule for every environment change. Two assumptions carried it:
+(a) "after an env change, 03 refuses", which is false because a lock-only bump leaves
+`pipeline_sha` unmoved (#45); and (b) "the local COGs are the published bytes", which
+stops being true once 03 runs under the new lock. Together, "bump, then run 01/02/03
+individually (the documented non-publishing route), then the check" reports same, and the
+reviewer proved it in a one-frame scratch tree (LZW standing in for a new GDAL). Fixed by
+stating the precondition wherever the check is named (run it right after the bump, before
+any stage runs under the new lock), and by correcting why 03 is no substitute: it
+overwrites the reference. The same precondition applies to the item-JSON `05 --out` advice.
+
 ## Errors Encountered
 
 | Error | Resolution |
 |-------|------------|
 | `diff a b` printed git-diff usage (`unknown switch i`) | `diff` is a shell function wrapping `git diff`; use `/usr/bin/diff` |
+| `git grep -nIiE '\bconda'` found nothing, not even CLAUDE.md's soul lines | `\b` is not word-boundary in git grep's ERE here; plain `-i conda`, allowed hits listed |

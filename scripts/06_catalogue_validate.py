@@ -26,7 +26,7 @@ catches an overwrite. --sample trades completeness for speed on a smoke run and
 says so in the output.
 
 Usage:
-    conda run -n stac-airphoto-bc python scripts/06_catalogue_validate.py
+    uv run python scripts/06_catalogue_validate.py
     ... --dir /tmp/patch --sample 50
 """
 

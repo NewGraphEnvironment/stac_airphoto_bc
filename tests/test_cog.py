@@ -5,7 +5,7 @@ RGB frame as RGBA, neither with a NoData (fly 0.19.0, fly#56) — so the tests r
 a fresh clone with no data.
 
 Run:
-    conda run -n stac-airphoto-bc pytest tests/ -q
+    uv run pytest tests/ -q
 """
 
 import importlib.util

@@ -1,7 +1,7 @@
 """Tests for the render check (#40): what the panels show and what the diff counts.
 
 Run:
-    conda run -n stac-airphoto-bc pytest tests/ -q
+    uv run pytest tests/ -q
 """
 
 import importlib.util

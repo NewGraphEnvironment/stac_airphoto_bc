@@ -90,7 +90,7 @@ message("Georeffed: ", sum(georef_results$success), "/", nrow(georef_results))
 
 message("\n=== COG ===")
 exit_code <- system(
-  "conda run --no-capture-output -n stac-airphoto-bc python scripts/03_cog.py"
+  "uv run --locked python scripts/03_cog.py"
 )
 if (exit_code != 0) stop("COG stage failed with exit code ", exit_code, call. = FALSE)
 
@@ -101,7 +101,7 @@ if (exit_code != 0) stop("COG stage failed with exit code ", exit_code, call. = 
 
 message("\n=== STAC REGISTER ===")
 exit_code <- system(
-  "conda run --no-capture-output -n stac-airphoto-bc python scripts/05_stac_register.py"
+  "uv run --locked python scripts/05_stac_register.py"
 )
 if (exit_code != 0) {
   stop("STAC registration failed with exit code ", exit_code, call. = FALSE)

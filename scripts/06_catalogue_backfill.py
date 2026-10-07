@@ -37,7 +37,7 @@ Writes only to --out-dir. Nothing here touches S3, `data/stac/`, or
 `collection.json`.
 
 Usage:
-    conda run -n stac-airphoto-bc python scripts/06_catalogue_backfill.py
+    uv run python scripts/06_catalogue_backfill.py
     ... --limit 50 --out-dir /tmp/patch      # smoke test
 """
 

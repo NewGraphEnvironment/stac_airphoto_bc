@@ -1,7 +1,7 @@
 """05_stac_register.py — generate STAC items and merge them into the collection.
 
 Usage:
-    conda run -n stac-airphoto-bc python scripts/05_stac_register.py
+    uv run python scripts/05_stac_register.py
     ... --out /tmp/dry            # dry run: write elsewhere, touch nothing live
     ... --no-merge                # rebuild from local COGs only (see WARNING)
 
