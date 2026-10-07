@@ -36,14 +36,14 @@ for this collection was measured 2026-10-06: 10,100 items, in sync.
   Registration needs tailnet ssh to geopro and stays a separate step after the sync, as now.
 
 ## Phase 1: Pin stacs and declare the catalogue
-- [ ] `environment.yml`: `python>=3.11` (stacs' floor), and under `pip:` add
+- [x] `environment.yml`: `python>=3.11` (stacs' floor), and under `pip:` add
       `"stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.1"`
-- [ ] Install into the local `stac-airphoto-bc` env (Python 3.12.14) with the same pip line.
+- [x] Install into the local `stac-airphoto-bc` env (Python 3.12.14) with the same pip line.
       Expect `stacs --version` to report 0.1.1
-- [ ] `05_stac_register.py`: add `ASSET_THUMBNAIL = "thumbnail"` beside `COLLECTION_ID`
+- [x] `05_stac_register.py`: add `ASSET_THUMBNAIL = "thumbnail"` beside `COLLECTION_ID`
       and use it where the `thumbnail` asset is built (line ~203). This gives the toml a
       module value to be pinned to
-- [ ] `stacs.toml` at the repo root:
+- [x] `stacs.toml` at the repo root:
       - `[catalogue]`: `api = "https://images.a11s.one"`,
         `collection_id = "stac-airphoto-bc"`,
         `bucket_url = "https://stac-airphoto-bc.s3.us-west-2.amazonaws.com"`
@@ -52,7 +52,7 @@ for this collection was measured 2026-10-06: 10,100 items, in sync.
         db `stac`, `/opt/geoserv/.env`, `/opt/geoserv/scripts`, `/root/.local/bin`,
         `pg_user stac`, `password_env = "POSTGRES_PASSWORD"`, `uv run pypgstac`)
       - a header comment naming which module holds each value
-- [ ] `tests/test_stacs_config.py`, a slimmed version of stac_dem_bc's. It loads
+- [x] `tests/test_stacs_config.py`, a slimmed version of stac_dem_bc's. It loads
       `05_stac_register.py` with `importlib`, the way `test_cog.py` loads `03_cog.py`. The
       tests:
       - the toml parses through `stacs.cli.read_config`
@@ -66,9 +66,9 @@ for this collection was measured 2026-10-06: 10,100 items, in sync.
         item without `thumbnail`. It also fails one that names another collection. The bad
         item sits in the middle of the sort order, so this proves the config is wired, not
         just present
-- [ ] Restore-the-bug check: drop `require` from the toml and confirm the missing-thumbnail
+- [x] Restore-the-bug check: drop `require` from the toml and confirm the missing-thumbnail
       test goes red; change `collection_id` and confirm the pin test goes red
-- [ ] `conda run -n stac-airphoto-bc pytest tests/ -q` is green
+- [x] `conda run -n stac-airphoto-bc pytest tests/ -q` is green
 
 ## Phase 2: Registration commands and docs
 - [ ] `scripts/run_pipeline.sh` heredoc: replace the `cd` block with
@@ -89,19 +89,34 @@ for this collection was measured 2026-10-06: 10,100 items, in sync.
         load-bearing. Drop the id-set-only claims
       - Line ~99: `catalogue_register.sh --all` becomes `stacs register --mode all`
       - The conda build recipe gains the stacs pip line
-- [ ] Grep for `catalogue_register|STAC_REQUIRE_ASSET|STAC_BUCKET_URL|stac_dem_bc's orchestrator`.
-      Only `planning/archive/` may still match
+- [ ] `scripts/06_catalogue_promote.sh` (plan review G1): its closing heredoc is a second copy
+      of the broken stac_dem_bc block. Replace it with the same stacs commands; rewrite the
+      note (verify now compares bodies); line 37's `catalogue_register.sh` becomes `stacs register`
+- [ ] Wording (G4): `CLAUDE.md` "Registration runs **before** the sync" means item generation
+      (`05_stac_register.py`); call the stacs step "pgstac registration". The heredoc's
+      "Register on geopro" runs on this machine and reaches geopro over ssh
+- [ ] Say why `stacs verify` follows `register --mode all` (S1): register ignores orphans,
+      verify fails on them and writes id lists with `--out-dir`
+- [ ] Pin test covers the README conda recipe too (G3), so a bump in one install path alone
+      fails; the recipe also gains `pytest` (missing today). Mutation: README pin bumped alone
+- [ ] Widened grep (G2), expect no hits outside `planning/`:
+      `catalogue_register|STAC_(COLLECTION|BUCKET_URL|REQUIRE_ASSET)|orchestrator|stac_dem_bc#45|--drift|--verify|PYTHON=|compares? (ids|id sets)|nothing (checks|compares) content`
+- [ ] `bash -n` on `run_pipeline.sh` and `06_catalogue_promote.sh`
 - [ ] Leave the build side alone: `05_stac_register.py` (except the constant),
-      `stac_validate.py`, `06_catalogue_validate.py`
+      `stac_validate.py`, `06_catalogue_validate.py`. The `"thumbnail"` literals in
+      `stac_validate.py` and `cog_render-compare.py` stay (G5): a rename that missed them
+      fails loudly, every item refused. `test_pipeline.R` stays as is (S2): it ends at the
+      sync and prints no registration hint today
 
 ## Phase 3: Live check
-- [ ] `stacs audit --config stacs.toml --dir data/stac --expect 10100` over the local items
+- [x] `stacs audit --config stacs.toml --dir data/stac --expect 10100` over the local items
       (offline)
-- [ ] `stacs verify --config stacs.toml --out-dir <scratchpad>` against images.a11s.one
+- [x] `stacs verify --config stacs.toml --out-dir <scratchpad>` against images.a11s.one
       (read-only). Expect IN SYNC 10,100/10,100
-- [ ] Only if in sync: `stacs register --config stacs.toml --mode all --dryrun`. This
-      exercises the documented command and writes nothing. Record what it did and did not
-      probe
+- [x] Only if in sync: `stacs register --config stacs.toml --mode all --dryrun` (reads
+      collection.json only; returns before any probe), then `--mode drift` without
+      `--dryrun` (plan review V1), which probes the API and ssh to geopro and, in sync,
+      writes nothing
 - [ ] Record timings and results in `findings.md`
 - [ ] Edit the #42 body: tick the items, note the v0.1.1 pin and why, and state that
       stac_dem_bc#49 had already deleted the script this repo pointed at

@@ -69,6 +69,8 @@ CENTROID_FIELDS = (
 BUCKET = "stac-airphoto-bc"
 S3_REGION = "us-west-2"
 COLLECTION_ID = "stac-airphoto-bc"
+# The asset every item carries. stacs.toml requires it (#42); tests pin the two.
+ASSET_THUMBNAIL = "thumbnail"
 STAC_DIR = Path("data/stac")
 CACHE_DIR = Path("data/centroids")
 WINDOW_DIR = Path("data/window")
@@ -200,7 +202,7 @@ def build_items(centroids: dict, build_by_id: dict, stac_dir: Path) -> list:
 
         rel = cog_path.relative_to(stac_dir)
         assets = {
-            "thumbnail": pystac.Asset(
+            ASSET_THUMBNAIL: pystac.Asset(
                 href=s3_href(rel),
                 media_type=pystac.MediaType.COG,
                 roles=["data", "thumbnail"],

@@ -43,6 +43,35 @@ the shell (10,100 items, in sync).
   `planning/archive/2026-10-issue-49-adopt-stacs/`.
 - `data/stac/` holds 10,101 JSONs locally (10,100 items + `collection.json`).
 
+## Plan review (2026-10-07)
+
+Plan agent, findings in `review-plan.md`. Folded in: G1 (`06_catalogue_promote.sh` carries a
+second copy of the broken heredoc), G2 (widened grep; the source writes `` `stac_dem_bc`'s ``
+with backticks, so the planned alternative never matched), G3 (README recipe pin), G4
+("registration" naming two steps), S1, V1 (the `--mode all --dryrun` returns before any
+probe, so it proves less than `verify`). G5 and S2 declined with reasons in `task_plan.md`.
+
+## Live check (2026-10-07, stacs 0.1.1, committed `stacs.toml`)
+
+- `stacs audit --config stacs.toml --dir data/stac --expect 10100`: OK, `require=thumbnail`,
+  2.5 s. **This proves this machine's tree only** (A2): `data/` is gitignored and no machine
+  is guaranteed to hold it all. The audit that protects pgstac is the one `register` runs on
+  the published bodies it fetches.
+- `stacs verify --config stacs.toml --out-dir <scratch>` (15:50:28Z): IN SYNC, 10,100
+  published / 10,100 registered, 0 missing, 0 orphaned, 0 changed, collection `same`,
+  exit 0, 1m11s.
+- `stacs register --mode all --dryrun` (15:51:50Z): fetched collection.json, 10,100 to
+  register, returned before the API and ssh probes (`register.py:461-467`).
+- `stacs register --mode drift`, no dryrun (15:51:53Z): API probe and ssh probe to
+  `root@geopro` passed, every body fetched and compared, "nothing to register -- already in
+  sync", exit 0, 1m07s. No write.
+- **Not exercised** (A3): the remote load path (`env_file`, `workdir`, `path_prepend`, the PG
+  exports, `uv run pypgstac`, `STACS_LOADED`). stac_dem_bc#49 did not exercise it either
+  (its archived findings, "Live check"). The first real `--mode all` here, or anywhere, is
+  its first live test. `stacs load collection --config stacs.toml data/stac/collection.json`
+  would test it on demand by upserting the byte-identical published body; that is a write
+  and the user's call.
+
 ## Errors Encountered
 
 | Error | Resolution |
