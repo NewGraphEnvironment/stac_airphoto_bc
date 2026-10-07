@@ -9,14 +9,15 @@ The audit tests run the installed `stacs` CLI, in process, against items shaped 
 `require` from stacs.toml and the missing-thumbnail test goes red.
 
 Run:
-    conda run -n stac-airphoto-bc pytest tests/ -q
+    uv run pytest tests/ -q
 """
 
 import importlib.metadata
 import importlib.util
 import json
-import re
+import tomllib
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -46,23 +47,35 @@ def cfg():
 # The toml agrees with the module, and the install with the pin
 # =============================================================================
 
+def _locked_stacs():
+    """The stacs source uv.lock resolved: (tag, commit), from
+    `git+...?tag=v0.1.1#<commit>`."""
+    lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    (pkg,) = [p for p in lock["package"] if p["name"] == "stacs"]
+    url = urlsplit(pkg["source"]["git"])
+    (tag,) = parse_qs(url.query)["tag"]
+    return tag, url.fragment
+
+
 def test_the_pinned_stacs_is_the_one_installed():
     """From the tag, not merely at its version: `__version__` is pyproject's, so an
     install from a later commit on main reads the same. direct_url.json records the
-    revision pip was asked for."""
+    revision uv was asked for and the commit it installed, which must be the one
+    uv.lock resolved."""
     assert stacs.__version__ == STACS_VERSION
     direct = json.loads(importlib.metadata.distribution("stacs").read_text("direct_url.json"))
     assert direct["vcs_info"]["requested_revision"] == f"v{STACS_VERSION}"
+    assert direct["vcs_info"]["commit_id"] == _locked_stacs()[1]
 
 
 def test_every_install_path_pins_the_same_tag():
-    """environment.yml and the conda recipe in scripts/README.md each install stacs; a
-    bump in one only would build one version on one machine and another elsewhere.
-    Every pin in each file, whole: a substring test would pass `v0.1.10`."""
-    pin = re.compile(r"stacs@v([0-9][0-9A-Za-z.\-]*[0-9A-Za-z])")
-    for rel in ("environment.yml", "scripts/README.md"):
-        assert pin.findall((ROOT / rel).read_text()) == [STACS_VERSION], \
-            f"{rel} does not pin v{STACS_VERSION}"
+    """pyproject.toml declares the stacs tag and uv.lock resolves it (#44); a bump in
+    one only would build one version on one machine and another elsewhere. Compared
+    whole, so `v0.1.10` does not pass for `v0.1.1`."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert project["tool"]["uv"]["sources"]["stacs"]["tag"] == f"v{STACS_VERSION}", \
+        f"pyproject.toml does not pin v{STACS_VERSION}"
+    assert _locked_stacs()[0] == f"v{STACS_VERSION}", f"uv.lock does not pin v{STACS_VERSION}"
 
 
 def test_collection_id_is_the_modules(cfg):

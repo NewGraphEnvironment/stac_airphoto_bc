@@ -26,7 +26,7 @@ run <- function(cmd) {
 # days after it, and a file touched in between would otherwise ship with a
 # checksum that describes something else.
 
-run("conda run --no-capture-output -n stac-airphoto-bc python scripts/stac_validate.py")
+run("uv run --locked python scripts/stac_validate.py")
 
 # --- Back up collection.json before anything overwrites it -----------------
 # Every other object in the bucket is reproducible from the pipeline or already

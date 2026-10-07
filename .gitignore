@@ -25,3 +25,6 @@ __pycache__/
 # Secrets
 .env
 *.tfvars
+
+# uv environment (#44)
+.venv/

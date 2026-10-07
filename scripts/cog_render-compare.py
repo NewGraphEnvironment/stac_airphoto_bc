@@ -1,9 +1,9 @@
 """cog_render-compare.py — draw COGs the way a GDAL client does, published beside local.
 
 Usage:
-    conda run -n stac-airphoto-bc python scripts/cog_render-compare.py
-    conda run -n stac-airphoto-bc python scripts/cog_render-compare.py 695106 --source published
-    conda run -n stac-airphoto-bc python scripts/cog_render-compare.py --sample 5 --seed 7
+    uv run python scripts/cog_render-compare.py
+    uv run python scripts/cog_render-compare.py 695106 --source published
+    uv run python scripts/cog_render-compare.py --sample 5 --seed 7
 
 Each frame is composited over a checkerboard through its alpha, so fill shows as
 checkerboard and genuine black shows as black (#36). With `--source both` (the

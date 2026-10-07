@@ -47,7 +47,7 @@ cd "$REPO_ROOT"
 
 PATCHED="data/stac_patched"
 STAC="data/stac"
-CONDA_RUN="conda run --no-capture-output -n stac-airphoto-bc"
+UV_RUN="uv run --locked"
 
 SYNC=1
 [ "${1:-}" = "--no-sync" ] && SYNC=0
@@ -65,12 +65,12 @@ fi
 if [ ! -d "$PATCHED" ]; then
   echo "No $PATCHED. Run:" >&2
   echo "  Rscript scripts/06_catalogue_fetch.R" >&2
-  echo "  $CONDA_RUN python scripts/06_catalogue_backfill.py" >&2
+  echo "  $UV_RUN python scripts/06_catalogue_backfill.py" >&2
   exit 1
 fi
 
 echo "=== 1/5 validate $PATCHED"
-$CONDA_RUN python scripts/06_catalogue_validate.py --dir "$PATCHED"
+$UV_RUN python scripts/06_catalogue_validate.py --dir "$PATCHED"
 
 echo
 echo "=== 2/5 promote into $STAC"
@@ -85,11 +85,11 @@ echo "item JSONs in $STAC: $n_before -> $n_after"
 
 echo
 echo "=== 3/5 regenerate local items and collection.json"
-$CONDA_RUN python scripts/05_stac_register.py
+$UV_RUN python scripts/05_stac_register.py
 
 echo
 echo "=== 4/5 validate $STAC — the bytes that ship"
-$CONDA_RUN python scripts/06_catalogue_validate.py --dir "$STAC"
+$UV_RUN python scripts/06_catalogue_validate.py --dir "$STAC"
 
 if [ "$SYNC" -eq 0 ]; then
   echo
@@ -108,8 +108,8 @@ Synced. The new properties are on S3 but NOT yet queryable: pgstac still holds
 the old items. Register them to make them searchable (upsert; nothing is
 deleted). From the repo root; stacs reaches the STAC host over ssh:
 
-  conda run --no-capture-output -n stac-airphoto-bc stacs register --config stacs.toml --mode all
-  conda run --no-capture-output -n stac-airphoto-bc stacs verify   --config stacs.toml
+  uv run stacs register --config stacs.toml --mode all
+  uv run stacs verify   --config stacs.toml
 
 --mode all because the backfill rewrote every item it touched. verify compares
 every body with what the API serves, so it confirms the new properties landed.

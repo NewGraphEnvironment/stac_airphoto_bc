@@ -5,7 +5,7 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 ## Repository Context
 
 **Repository:** NewGraphEnvironment/stac_airphoto_bc
-**Primary Language:** R + Python (conda env `stac-airphoto-bc`)
+**Primary Language:** R + Python (uv: `pyproject.toml` + `uv.lock`, run with `uv run`)
 **SRED:** NewGraphEnvironment/sred-2025-2026#22
 **Live:** [images.a11s.one/collections/stac-airphoto-bc](https://images.a11s.one/collections/stac-airphoto-bc)
 **Pages:** [newgraphenvironment.com/stac_airphoto_bc](https://www.newgraphenvironment.com/stac_airphoto_bc/)
@@ -59,8 +59,8 @@ own STAC output. pgstac registration runs after it (below).
 way a GDAL client does, published | local | diff (magenta = differs), so a person can
 see fill as transparent and black as black:
 ```bash
-conda run -n stac-airphoto-bc python scripts/cog_render-compare.py [airp_id ...]                # before: what changes, for these frames
-conda run -n stac-airphoto-bc python scripts/cog_render-compare.py --expect-same [airp_id ...]  # after: exit 1 unless byte-identical
+uv run python scripts/cog_render-compare.py [airp_id ...]                # before: what changes, for these frames
+uv run python scripts/cog_render-compare.py --expect-same [airp_id ...]  # after: exit 1 unless byte-identical
 ```
 It is a **spot check, not a census**: two frames per band shape, seeded so a re-run
 draws the same ones, plus any ids named. A sync that changes other frames shows
@@ -72,18 +72,34 @@ reported, not fatal. Output goes to `data/logs/render/<stamp>/` (PNGs plus
 `summary.csv`); the only things read are the item JSONs, the local COGs and the
 bucket.
 
+**Rewrite check, right after any change to the Python environment** (#44). The COG
+bytes are written by the GDAL inside rasterio's wheel, so a `uv.lock` bump can change
+every `file:checksum` with no change to the content. `cog_rewrite-check.py` makes
+`03_cog.py`'s own call on every frame, `write_cog()` with `frame_tags()` and `shift_of()`
+of its window row, in a temp dir, and exits 1 unless every rewrite matches the local
+COG byte for byte. **Run it before any stage runs under the new lock.** The local COG is
+the reference, and once 03 has rewritten it the check compares the new env with itself.
+A lock-only bump does not move `pipeline_sha` (#45), so 03 will not refuse to run:
+```bash
+uv run python scripts/cog_rewrite-check.py   # ~11 min for 10,100 frames on 8 workers
+```
+`03_cog.py` is no substitute (it overwrites the reference), and neither is the render
+check (it compares files already written). COGs only: for item JSON (a pystac bump),
+compare `05_stac_register.py --out <scratch dir>` with `data/stac`, also before 05
+runs under the new lock.
+
 Run end-to-end: `bash scripts/run_pipeline.sh [aoi_id ...]`
 
 **pgstac registration, after the sync** (#42), is the
 [`stacs`](https://github.com/NewGraphEnvironment/stacs) package, pinned to a tag in
-`environment.yml`. `stacs.toml` declares the catalogue: API, collection id, bucket, the
+`pyproject.toml` (`[tool.uv.sources]`) and locked in `uv.lock`. `stacs.toml` declares the catalogue: API, collection id, bucket, the
 required `thumbnail` asset, and the STAC host it writes through (`root@geopro`, over the
 tailnet). `tests/test_stacs_config.py` pins the collection id, bucket and asset key to
 `05_stac_register.py`; the API and the host are in no module, so only a live run checks
 them. From the repo root:
 ```bash
-conda run --no-capture-output -n stac-airphoto-bc stacs register --config stacs.toml --mode all
-conda run --no-capture-output -n stac-airphoto-bc stacs verify   --config stacs.toml
+uv run stacs register --config stacs.toml --mode all
+uv run stacs verify   --config stacs.toml
 ```
 `register` fetches the **published** `collection.json` and every item it links, audits
 every item it will send (collection id, a `thumbnail` asset on each, no id twice; under

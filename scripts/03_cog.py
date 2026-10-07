@@ -1,7 +1,7 @@
 """03_cog.py — place, tag and write each georeferenced thumbnail as a COG.
 
 Usage:
-    conda run -n stac-airphoto-bc python scripts/03_cog.py
+    uv run python scripts/03_cog.py
 
 One write per file, and it is the last step to touch a published byte (#30).
 This used to be two steps: `03_cog.R` wrote the COG and `03_cog_tag.py` then

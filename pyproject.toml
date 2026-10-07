@@ -1,0 +1,36 @@
+[project]
+name = "stac-airphoto-bc"
+version = "0.1.0"
+description = "Python steps of the stac-airphoto-bc pipeline: COG write, STAC items, validation, render check."
+# 3.12, not stacs' 3.11 (#42): rasterio 1.5 requires it, and under a 3.11 floor uv.lock
+# forks to rasterio 1.4.x there, a different bundled GDAL and so different COG bytes (#44).
+requires-python = ">=3.12"
+dependencies = [
+    "pystac>=1.12.0",
+    "rio-stac>=0.11.0",
+    # The PyPI wheel, which bundles its own GDAL, as it was under conda (#44). That GDAL
+    # writes the COG bytes every `file:checksum` describes, so uv.lock holds rasterio at
+    # the version that built the published collection; a bump is its own change, checked
+    # with `uv run python scripts/cog_rewrite-check.py` before any stage runs on it.
+    "rasterio>=1.4.0",
+    "shapely",
+    "pyarrow",
+    "tqdm",
+    "jsonschema",
+    # Registration and verification on pgstac (#42), from its git tag (stacs README,
+    # "Install"). The tag is also pinned by tests/test_stacs_config.py, so a bump here
+    # alone fails there.
+    "stacs",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.uv.sources]
+stacs = { git = "https://github.com/NewGraphEnvironment/stacs", tag = "v0.1.1" }
+
+# Scripts-only repo, not an installable package; uv manages the environment.
+[tool.uv]
+package = false

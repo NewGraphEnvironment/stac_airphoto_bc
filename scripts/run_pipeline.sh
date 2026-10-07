@@ -5,7 +5,8 @@
 #   bash scripts/run_pipeline.sh                 # every registered AOI
 #   bash scripts/run_pipeline.sh se_a se_b       # named AOIs only
 #
-# Requires: R with fly/terra/arrow/flooded, conda env stac-airphoto-bc, AWS
+# Requires: R with fly/terra/arrow/flooded, uv (the Python env is pyproject.toml +
+# uv.lock), AWS
 # credentials with write access to s3://stac-airphoto-bc.
 #
 # No fly version is named here on purpose. 01_fetch.R and 02_georef.R call
@@ -17,8 +18,12 @@
 # after, which meant the item JSONs and collection.json a run produced were never
 # uploaded by that run — the ones on S3 were always the previous cycle's.
 
-# pipefail matters here: several steps pipe through conda run, and without it a
-# failing script is masked by the exit status of the last command in the pipe.
+# pipefail, so that piping any step later (through tee, say) cannot mask its failure
+# behind the exit status of the last command in the pipe.
+#
+# `uv run --locked`: syncs .venv to uv.lock but refuses to re-resolve, so a hand edit
+# to pyproject.toml cannot quietly install a new rasterio (and its GDAL) mid-run,
+# between steps that write published bytes (#44).
 set -euo pipefail
 
 AOI_IDS=("$@")
@@ -49,11 +54,11 @@ run_r scripts/02_georef.R
 
 echo ""
 echo "=== 03: COG ==="
-conda run --no-capture-output -n stac-airphoto-bc python scripts/03_cog.py
+uv run --locked python scripts/03_cog.py
 
 echo ""
 echo "=== 04: STAC REGISTER ==="
-conda run --no-capture-output -n stac-airphoto-bc python scripts/05_stac_register.py
+uv run --locked python scripts/05_stac_register.py
 
 echo ""
 echo "=== 05: S3 UPLOAD ==="
@@ -65,8 +70,8 @@ cat <<'EOF'
 Register into pgstac to make it searchable. From the repo root; stacs reaches the
 STAC host (root@geopro) over ssh, upserts only, and deletes nothing:
 
-  conda run --no-capture-output -n stac-airphoto-bc stacs register --config stacs.toml --mode all
-  conda run --no-capture-output -n stac-airphoto-bc stacs verify   --config stacs.toml
+  uv run stacs register --config stacs.toml --mode all
+  uv run stacs verify   --config stacs.toml
 
 --mode drift also works: it compares bodies, so it sends the collection and only
 the items the API lacks or serves differently, which includes every item this run

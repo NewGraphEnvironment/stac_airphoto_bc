@@ -1,7 +1,7 @@
 """stac_validate.py — check every local item against its COG before a sync (#30).
 
 Usage:
-    conda run -n stac-airphoto-bc python scripts/stac_validate.py
+    uv run python scripts/stac_validate.py
 
 Run by 04_s3_upload.R before anything is uploaded, and its `check_item()` by
 05_stac_register.py before anything is written. Exits non-zero on any problem.
