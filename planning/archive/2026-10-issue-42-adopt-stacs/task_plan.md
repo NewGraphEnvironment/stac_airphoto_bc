@@ -126,4 +126,4 @@ for this collection was measured 2026-10-06: 10,100 items, in sync.
 - [x] Tests pass
 - [x] `/code-check` clean on each commit
 - [x] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] `/planning-archive` on completion
