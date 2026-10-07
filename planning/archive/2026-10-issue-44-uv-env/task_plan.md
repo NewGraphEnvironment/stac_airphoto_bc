@@ -71,10 +71,10 @@ locked env that matches the siblings, with no change to any COG byte or item bod
 - [x] `uv run pytest tests/ -q` and `Rscript tests/test_aoi.R` pass
 
 ## Phase 3: Close out
-- [ ] Edit #44's body: correct the GDAL premise, record the census
+- [x] Edit #44's body: correct the GDAL premise, record the census
 - [x] Follow-up issue #45: `pipeline_sha` does not cover `pyproject.toml`/`uv.lock`, so a lock bump
       that changes COG bytes leaves provenance unchanged
-- [ ] `/code-check`, `/planning-archive` (README with Measurement and Evidence), `/gh-pr-push`
+- [x] `/code-check` (3 rounds, ended by enumeration), `/planning-archive` (README with Measurement and Evidence), `/gh-pr-push`
 - [ ] After merge, not in this PR: set `stac_dem_bc#16`'s `stac_airphoto_bc` row to migrated
 
 ## Not in scope
@@ -84,7 +84,7 @@ locked env that matches the siblings, with no change to any COG byte or item bod
 
 ## Validation
 
-- [ ] Tests pass
-- [ ] `/code-check` clean on each commit
-- [ ] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] Tests pass
+- [x] `/code-check` clean on each commit
+- [x] PWF checkboxes match landed work
+- [x] `/planning-archive` on completion
