@@ -24,7 +24,9 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 
 ## Architecture
 
-Built on [fly](https://github.com/NewGraphEnvironment/fly). No version is pinned:
+Built on [fly](https://github.com/NewGraphEnvironment/fly), registered into pgstac with
+[stacs](https://github.com/NewGraphEnvironment/stacs) (Pipeline, below). No fly version is
+pinned:
 `aoi_require_fly()` (`scripts/aoi.R`) asserts the capability instead — that `dem`
 reaches `fly_filter()`, `fly_footprint()` and `fly_georef()` — and
 `aoi_check_footprint_cols()` that `fly_footprint()` returns `height_source`
@@ -50,7 +52,8 @@ that built it (`nge:fly_version`, `nge:fly_sha`).
 | S3 | `04_s3_upload.R` | `stac_validate.py`, back up `collection.json` and every item JSON, then `aws s3 sync` (never `--delete`) |
 | Backfill | `06_catalogue_fetch.R` + `06_catalogue_backfill.py` + `06_catalogue_validate.py` + `06_catalogue_promote.sh` | Add the catalogue metadata to items published before #21, whose COGs are no longer on any machine here |
 
-Registration runs **before** the sync, so a run uploads its own STAC output.
+Item generation (`05_stac_register.py`) runs **before** the sync, so a run uploads its
+own STAC output. pgstac registration runs after it (below).
 
 **Render check, around every sync** (#40). `cog_render-compare.py` draws frames the
 way a GDAL client does, published | local | diff (magenta = differs), so a person can
@@ -71,6 +74,32 @@ bucket.
 
 Run end-to-end: `bash scripts/run_pipeline.sh [aoi_id ...]`
 
+**pgstac registration, after the sync** (#42), is the
+[`stacs`](https://github.com/NewGraphEnvironment/stacs) package, pinned to a tag in
+`environment.yml`. `stacs.toml` declares the catalogue: API, collection id, bucket, the
+required `thumbnail` asset, and the STAC host it writes through (`root@geopro`, over the
+tailnet). `tests/test_stacs_config.py` pins the collection id, bucket and asset key to
+`05_stac_register.py`; the API and the host are in no module, so only a live run checks
+them. From the repo root:
+```bash
+conda run --no-capture-output -n stac-airphoto-bc stacs register --config stacs.toml --mode all
+conda run --no-capture-output -n stac-airphoto-bc stacs verify   --config stacs.toml
+```
+`register` fetches the **published** `collection.json` and every item it links, audits
+every item it will send (collection id, a `thumbnail` asset on each, no id twice; under
+`--mode all`, every item) before anything is written, upserts the collection and then the
+items, and checks the API serves what was sent.
+Nothing is deleted. `--mode all` re-sends every item. `--mode drift` sends only the items
+the API lacks or serves with a different body (a digest over canonical JSON), with the
+collection, so it does refresh items a rebuild rewrote, and is the cheaper choice when a
+run touched few.
+`verify` compares every body in both directions and, unlike `register`, fails on
+orphans: ids still registered but no longer published. `--dryrun` on `--mode all` reads
+only `collection.json` and probes neither the API nor the host.
+Not rtj's `stac_register-pypgstac.sh`: it DELETEs the collection before reloading, and
+`pgstac.items.collection` cascades, so a failure between the two leaves the API empty
+(2026-08-29).
+
 ### The AOI is a parameter
 
 `scripts/aoi.R` is the registry — `neexdzii_kwa` (watershed), `se_a`, `se_b`,
@@ -84,32 +113,6 @@ AOIs therefore share a frame rather than publishing it twice.
 `data/select/<id>.csv` is a ledger with one row per candidate and exactly one
 outcome, reconciled against the centroid cache. `data/reports/<id>.md` renders
 from it.
-
-Registration on geopro (separate step, after the sync, over the tailnet as
-`root@geopro`) is `stac_dem_bc`'s orchestrator. It fetches the **published**
-`collection.json` and every item it links, audits them all (collection id, count, a
-`thumbnail` asset on each), and only then upserts the collection and then the items:
-```bash
-cd ~/Projects/repo/stac_dem_bc   # on this machine, not geopro, which has no checkout
-( export STAC_COLLECTION=stac-airphoto-bc \
-    STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
-    STAC_REQUIRE_ASSET=thumbnail
-  bash scripts/catalogue_register.sh --all &&
-  bash scripts/catalogue_register.sh --verify )
-```
-`--all`, not `--drift`: drift diffs **id sets**, so it registers only ids the API
-lacks and never refreshes an id already there. Every rebuild here rewrites existing
-ids (#23 rewrote all of them), and pgstac would keep their old properties and
-checksums while `--verify`, which compares ids too, still passes (stac_dem_bc#45:
-nothing checks content). Run it from `stac_dem_bc`'s `origin/main`. If that checkout is on a feature branch,
-use `git worktree add --detach <tmp> origin/main` rather than switching someone's tree,
-and set `PYTHON=~/Projects/repo/stac_dem_bc/.venv/bin/python`, because the script
-looks for `.venv` relative to where it runs (#36, 2026-09-29). The subshell keeps
-the variables out of the shell, where a later `catalogue_register.sh` meant for the
-DEM collection would silently act on this one.
-Not rtj's `stac_register-pypgstac.sh`: it DELETEs the collection before reloading, and
-`pgstac.items.collection` cascades, so a failure between the two leaves the API empty
-(2026-08-29).
 
 The only database the pipeline touches is fwapg, for the Neexdzii Kwa watershed polygon
 (`fresh::frs_watershed_at_measure()`). The local `fresh-db` container serves it; point
@@ -287,8 +290,8 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
   success for frames it did not write this run.
 - `stac_register-pypgstac.sh` on geopro **deletes and reloads** from
   `collection.json`, and aborts after the delete if any item fetch fails, leaving
-  the collection empty. Register with `stac_dem_bc`'s
-  `catalogue_register.sh --all` instead (Pipeline, above).
+  the collection empty. Register with `stacs register --config stacs.toml --mode all`
+  instead (Pipeline, above).
 
 <!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 

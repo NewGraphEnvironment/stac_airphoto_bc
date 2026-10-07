@@ -6,7 +6,8 @@ channels:
   # here needs it: python and pip come from conda-forge, everything else is pip.
   - conda-forge
 dependencies:
-  - python>=3.9
+  # 3.11 is stacs' floor (registration, #42).
+  - python>=3.11
   - pip
   - pip:
       - pystac>=1.12.0
@@ -17,3 +18,6 @@ dependencies:
       - tqdm
       - jsonschema
       - pytest
+      # Registration and verification on pgstac (#42). Pinned to a tag; the tag is
+      # also pinned by tests/test_stacs_config.py, so a bump here alone fails there.
+      - "stacs @ git+https://github.com/NewGraphEnvironment/stacs@v0.1.1"

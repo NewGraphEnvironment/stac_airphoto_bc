@@ -1,0 +1,34 @@
+# This catalogue, declared for stacs (#42). stacs register, verify and audit read it with
+# `--config stacs.toml`; the commands to run are in CLAUDE.md and scripts/README.md.
+#
+# The catalogue values also live in scripts/05_stac_register.py -- the collection id in
+# COLLECTION_ID, the bucket URL in S3_BASE, the asset key in ASSET_THUMBNAIL -- and
+# tests/test_stacs_config.py fails if the two disagree. Change the module, then this.
+#
+# No setting is a secret. The password stays on the host, named by password_env.
+
+[catalogue]
+api = "https://images.a11s.one"
+collection_id = "stac-airphoto-bc"
+bucket_url = "https://stac-airphoto-bc.s3.us-west-2.amazonaws.com"
+
+[assets]
+# Every item carries its georeferenced thumbnail COG. The scans (`visual`) and the
+# catalogue's metadata assets are present only where they exist, so they are not required.
+require = "thumbnail"
+
+[transport]
+# The STAC host, shared with stac_dem_bc's catalogue: same machine, database and loader.
+# MagicDNS name over the tailnet, root-only by design (rtj#193). If the tailnet is the
+# suspect, the DigitalOcean reserved IP is the same machine:
+#   stacs register --config stacs.toml --host root@146.190.12.8 --mode all
+host = "root@geopro"
+db = "stac"
+env_file = "/opt/geoserv/.env"
+workdir = "/opt/geoserv/scripts"
+path_prepend = "/root/.local/bin"
+pg_host = "localhost"
+pg_port = 5432
+pg_user = "stac"
+password_env = "POSTGRES_PASSWORD"
+pypgstac = ["uv", "run", "pypgstac"]

@@ -13,9 +13,9 @@
 # `dem` reaches fly_filter(), fly_footprint() and fly_georef() — rather than a
 # number that goes stale every time fly releases. See scripts/aoi.R.
 #
-# Registration runs BEFORE the S3 sync. It used to run after, which meant the
-# item JSONs and collection.json a run produced were never uploaded by that run
-# — the ones on S3 were always the previous cycle's.
+# Item generation (05_stac_register.py) runs BEFORE the S3 sync. It used to run
+# after, which meant the item JSONs and collection.json a run produced were never
+# uploaded by that run — the ones on S3 were always the previous cycle's.
 
 # pipefail matters here: several steps pipe through conda run, and without it a
 # failing script is masked by the exit status of the last command in the pipe.
@@ -62,15 +62,14 @@ Rscript scripts/04_s3_upload.R
 echo ""
 echo "=== DONE ==="
 cat <<'EOF'
-Register on geopro to make it searchable (upsert; nothing is deleted):
+Register into pgstac to make it searchable. From the repo root; stacs reaches the
+STAC host (root@geopro) over ssh, upserts only, and deletes nothing:
 
-  cd ~/Projects/repo/stac_dem_bc
-  ( export STAC_COLLECTION=stac-airphoto-bc \
-      STAC_BUCKET_URL=https://stac-airphoto-bc.s3.us-west-2.amazonaws.com \
-      STAC_REQUIRE_ASSET=thumbnail
-    bash scripts/catalogue_register.sh --all &&
-    bash scripts/catalogue_register.sh --verify )
+  conda run --no-capture-output -n stac-airphoto-bc stacs register --config stacs.toml --mode all
+  conda run --no-capture-output -n stac-airphoto-bc stacs verify   --config stacs.toml
 
---all, not --drift: drift registers only ids the API lacks and never refreshes
-an item this run rebuilt.
+--mode drift also works: it compares bodies, so it sends the collection and only
+the items the API lacks or serves differently, which includes every item this run
+rebuilt. verify follows register because only verify fails on orphans (ids
+registered but no longer published).
 EOF
