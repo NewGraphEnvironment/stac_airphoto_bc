@@ -16,6 +16,7 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 - Two regions: Neexdzii Kwa watershed (9,824) and three small southeast BC AOIs (276 unique)
 - 33.2 GiB of thumbnails on S3 (`s3://stac-airphoto-bc`, measured 2026-09-29). The pre-#23 collection and item JSONs are in `backup/*20260927T003819*`, the pre-#36 ones in `backup/*20260929T063100*`, the pre-#47 (`nge:`-named) ones in `backup/*20261010T175309*`
 - Registered on pgstac via `images.a11s.one`
+- Versioned as a catalogue (v1.0.0, 2026-10-11): a tag names a **published** state, cut when a sync publishes, never by a PR merge. `NEWS.md` carries `## Unreleased` until then; `pyproject.toml`'s `version` is not the release
 - GDAL metadata tags embedded in each COG (visible in QGIS)
 - STAC item titles: `airp_id — roll_frame — date`
 - Every item carries `file:checksum` and its build provenance (#23, #30); versioning on
