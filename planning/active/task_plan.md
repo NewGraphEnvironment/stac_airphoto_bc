@@ -33,9 +33,9 @@ Decided at the plan gate (2026-10-10):
 - [x] `05_stac_register.py`: stamp `processing:datetime` (the COG mtime, as before) and list `PROCESSING_EXTENSION` in `stac_extensions`
 
 ## Phase 3: Validator (`scripts/stac_validate.py`)
-- [ ] `tags_disagree()`: compare `FLY_VERSION`+`FLY_SHA` with `processing:software["fly"]`, and `PIPELINE_SHA` with `processing:version`. Keep the existing loop for the `airphoto:` tags
-- [ ] `check_item()`: refuse undeclared prefixes on properties and on asset fields (this catches `nge:` and any future stray), refuse `processing:*` without the extension, and refuse `processing:software` without a `fly` entry
-- [ ] Restore the bug: put an `nge:` key back in a fixture, and drop `PROCESSING_EXTENSION` from 05, and confirm each guard fails
+- [x] `tags_disagree()`: compare `FLY_VERSION`+`FLY_SHA` with `processing:software["fly"]`, and `PIPELINE_SHA` with `processing:version`. Keep the existing loop for the `airphoto:` tags
+- [x] `check_item()`: refuse undeclared prefixes on properties and on asset fields (this catches `nge:` and any future stray), refuse `processing:*` without the extension, and refuse `processing:software` without a `fly` entry
+- [x] Restore the bug: put an `nge:` key back in a fixture, and drop `PROCESSING_EXTENSION` from 05, and confirm each guard fails
 
 ## Phase 4: Local proof (nothing published)
 - [ ] `uv run pytest tests/ -q` green

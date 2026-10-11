@@ -6,3 +6,5 @@
 - Created branch `47-move-the-nge-item-fields-to-standard-or` off main
 - Scaffolded PWF baseline from issue #47 with approved phases
 - Next: start Phase 1
+- Phases 1-3: tests, writer, validator. 105 tests pass.
+- Mutation table (copy under scratchpad, 6 mutations): removing the prefix guard fails 5 tests; removing the fly-entry check, 3; dropping the PIPELINE_SHA tag compare, 1; writing a half fly build, 4; putting `nge:fly_sha` back in the writer, 2; un-declaring the processing schema, 1. Dropping PROCESSING_EXTENSION from 05 is proved in Phase 4 (05 runs check_item on every item before it writes).

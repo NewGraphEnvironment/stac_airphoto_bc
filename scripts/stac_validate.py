@@ -26,6 +26,7 @@ from urllib.parse import unquote, urlparse
 sys.path.insert(0, str(Path(__file__).parent))
 from airphoto_props import (  # noqa: E402
     BUILD_PROPERTY_FIELDS,
+    FIELD_PREFIXES,
     FILE_EXTENSION,
     PLACEMENT_SOURCES,
     REQUIRED_BUILD_PROPERTIES,
@@ -62,6 +63,39 @@ def tags_disagree(path: Path, props: dict) -> list[str]:
             str(int(prop)) if isinstance(prop, float) and prop.is_integer() else str(prop))
         if tag != prop_text:
             out.append(f"COG tag {field.upper()}={tag!r} but item {key}={prop!r}")
+    # The run, stamped as tags under their window-column names (#47).
+    software = props.get("processing:software")
+    fly = software.get("fly") if isinstance(software, dict) else None
+    tag_fly = f"{tags.get('FLY_VERSION')}+{tags.get('FLY_SHA')}"
+    if fly != tag_fly:
+        out.append(f"COG tags FLY_VERSION+FLY_SHA={tag_fly!r} but item "
+                   f"processing:software fly={fly!r}")
+    if tags.get("PIPELINE_SHA") != props.get("processing:version"):
+        out.append(f"COG tag PIPELINE_SHA={tags.get('PIPELINE_SHA')!r} but item "
+                   f"processing:version={props.get('processing:version')!r}")
+    return out
+
+
+def fields_undeclared(doc: dict) -> list[str]:
+    """Property and asset-field prefixes outside `FIELD_PREFIXES`, or whose schema
+    the item does not list in `stac_extensions`.
+
+    Keys with no prefix are core STAC (`datetime`, `title`, `href`, ...).
+    """
+    extensions = doc.get("stac_extensions", [])
+    fields = [(key, "property") for key in doc.get("properties", {})]
+    for name, asset in doc.get("assets", {}).items():
+        fields += [(key, f"asset {name}") for key in asset]
+    out = []
+    for key, where in fields:
+        if ":" not in key:
+            continue
+        prefix = key.split(":", 1)[0]
+        if prefix not in FIELD_PREFIXES:
+            out.append(f"{where} field {key} has an undeclared prefix")
+        elif FIELD_PREFIXES[prefix] and FIELD_PREFIXES[prefix] not in extensions:
+            out.append(f"{where} field {key} without {FIELD_PREFIXES[prefix]} "
+                       f"in stac_extensions")
     return out
 
 
@@ -72,6 +106,7 @@ def check_item(doc: dict, stac_dir: Path = STAC_DIR) -> list[str]:
 
     if FILE_EXTENSION not in doc.get("stac_extensions", []):
         problems.append("file extension not declared")
+    problems.extend(fields_undeclared(doc))
 
     thumb = doc.get("assets", {}).get("thumbnail")
     if thumb is None:
@@ -93,6 +128,9 @@ def check_item(doc: dict, stac_dir: Path = STAC_DIR) -> list[str]:
     for key in REQUIRED_BUILD_PROPERTIES:
         if key not in props:
             problems.append(f"missing {key}")
+    software = props.get("processing:software")
+    if software is not None and not (isinstance(software, dict) and software.get("fly")):
+        problems.append(f"processing:software has no fly entry: {software!r}")
 
     film = str(props.get("airphoto:media", "")).startswith("Film")
     if film:
