@@ -43,8 +43,8 @@ Decided at the plan gate (2026-10-10):
 - [ ] `check_item(doc, Path("data/stac"))` on every scratch item: 0 problems, with tags checked against the real COGs
 
 ## Phase 5: Docs, NEWS, issue
-- [ ] `CLAUDE.md` (Architecture paragraph, the Build properties table) and `README.Rmd`, then re-render `README.md`. Check that the diff touches only that paragraph
-- [ ] New `NEWS.md` with an entry for the unpublished change that names each old → new pair (saved filters stop matching), plus the `like '0.19.0+%'` note for filtering by fly version
+- [x] `CLAUDE.md` (Architecture paragraph, the Build properties table) and `README.Rmd`, then re-render `README.md`. Check that the diff touches only that paragraph
+- [x] New `NEWS.md` with an entry for the unpublished change that names each old → new pair (saved filters stop matching), plus the `like '0.19.0+%'` note for filtering by fly version
 - [ ] Edit the #47 body so its Fields table records the decisions. Comment on crate#23 that this repo needs no new prefix, though `airphoto:` itself still has no schema
 
 ## Validation

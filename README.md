@@ -85,9 +85,13 @@ values came from, so frames can be filtered and checked:
   height, repaired a known unit slip, or refused an implausible one.
 
 Each thumbnail asset carries `file:checksum` (a sha256 multihash) and
-`file:size`, and each item the `fly` and pipeline commits that built it
-(`nge:fly_version`, `nge:fly_sha`, `nge:pipeline_sha`,
-`nge:produced_datetime`).
+`file:size`, and each item the `fly` build and pipeline commit that made
+it, in the [processing
+extension](https://github.com/stac-extensions/processing):
+`processing:software` (`{"fly": "<version>+<sha>"}`),
+`processing:version` (the pipeline commit) and `processing:datetime`
+(when the COG was written). Items published before the rebuild that
+carries \#47 hold the same values as `nge:` fields; see [NEWS](NEWS.md).
 
 Every item also carries the BC Data Catalogue’s own metadata as
 queryable `airphoto:` properties — `media`, `bcgs_tile`, `nts_tile`,
