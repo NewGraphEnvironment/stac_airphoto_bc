@@ -28,9 +28,9 @@ Decided at the plan gate (2026-10-10):
 - [x] `tests/test_cog.py`: `tags_disagree()` on a tmp GeoTIFF whose `FLY_SHA` tag differs from the sha part of `processing:software["fly"]` reports the mismatch, and one whose `PIPELINE_SHA` differs from `processing:version` does too
 
 ## Phase 2: Writer (`scripts/airphoto_props.py`, `scripts/05_stac_register.py`)
-- [ ] `airphoto_props.py`: remove the `nge:` rows from `BUILD_PROPERTY_FIELDS`, leaving the `airphoto:` mapping only. `build_properties()` adds `processing:software` and `processing:version`. Rewrite the prefix comment block: `processing:` is now the ground shared with floodplains#74
-- [ ] `airphoto_props.py`: add a `PROCESSING_EXTENSION` constant (`https://stac-extensions.github.io/processing/v1.2.0/schema.json`) and a declared-prefix set. `REQUIRED_BUILD_PROPERTIES` swaps the four `nge:` keys for `processing:software`, `processing:version` and `processing:datetime`
-- [ ] `05_stac_register.py`: stamp `processing:datetime` (the COG mtime, as before) and list `PROCESSING_EXTENSION` in `stac_extensions`
+- [x] `airphoto_props.py`: remove the `nge:` rows from `BUILD_PROPERTY_FIELDS`, leaving the `airphoto:` mapping only. `build_properties()` adds `processing:software` and `processing:version`. Rewrite the prefix comment block: `processing:` is now the ground shared with floodplains#74
+- [x] `airphoto_props.py`: add a `PROCESSING_EXTENSION` constant (`https://stac-extensions.github.io/processing/v1.2.0/schema.json`) and a declared-prefix set. `REQUIRED_BUILD_PROPERTIES` swaps the four `nge:` keys for `processing:software`, `processing:version` and `processing:datetime`
+- [x] `05_stac_register.py`: stamp `processing:datetime` (the COG mtime, as before) and list `PROCESSING_EXTENSION` in `stac_extensions`
 
 ## Phase 3: Validator (`scripts/stac_validate.py`)
 - [ ] `tags_disagree()`: compare `FLY_VERSION`+`FLY_SHA` with `processing:software["fly"]`, and `PIPELINE_SHA` with `processing:version`. Keep the existing loop for the `airphoto:` tags

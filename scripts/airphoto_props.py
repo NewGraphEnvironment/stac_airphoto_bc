@@ -177,9 +177,11 @@ def catalogue_assets(meta: dict) -> dict:
 # --- How the item was built (#23, #30) -----------------------------------
 #
 # The catalogue says what the photograph is; these say how this pipeline placed
-# it. `airphoto:` for facts about the frame's georeferencing, `nge:` for the run
-# that produced it — the same prefix `stac_floodplains_bc` uses for run
-# provenance, so one query spans both collections.
+# it. `airphoto:` for facts about the frame's georeferencing, the processing
+# extension for the run that produced it (#47): `processing:software` for the fly
+# build, `processing:version` for this pipeline's commit, `processing:datetime`
+# for when the raster was written. stac_floodplains_bc#74 moves its run fields
+# to the same extension, so one query still spans both collections.
 
 # window column -> item property
 BUILD_PROPERTY_FIELDS = {
@@ -190,9 +192,6 @@ BUILD_PROPERTY_FIELDS = {
     "placement_source": "airphoto:placement_source",
     "shift_x_m_3005": "airphoto:shift_x_m_3005",
     "shift_y_m_3005": "airphoto:shift_y_m_3005",
-    "fly_version": "nge:fly_version",
-    "fly_sha": "nge:fly_sha",
-    "pipeline_sha": "nge:pipeline_sha",
 }
 
 # Closed vocabularies. A value outside one is a change upstream (a new fly route,
@@ -208,16 +207,28 @@ REQUIRED_BUILD_PROPERTIES = (
     "airphoto:placement_source",
     "airphoto:shift_x_m_3005",
     "airphoto:shift_y_m_3005",
-    "nge:fly_version",
-    "nge:fly_sha",
-    "nge:pipeline_sha",
-    "nge:produced_datetime",
+    "processing:software",
+    "processing:version",
+    "processing:datetime",
 )
 # ... and every FILM item carries these too. Digital frames take fly's measured
 # corner mapping and have no scanning rotation to report.
 REQUIRED_FILM_PROPERTIES = ("airphoto:rotation", "airphoto:rotation_source")
 
+PROJECTION_EXTENSION = "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
 FILE_EXTENSION = "https://stac-extensions.github.io/file/v2.1.0/schema.json"
+PROCESSING_EXTENSION = "https://stac-extensions.github.io/processing/v1.2.0/schema.json"
+
+# Every prefix an item may carry, on a property or an asset field, and the schema
+# that declares it. A field outside this set is refused (`stac_validate.py`), so a
+# renamed or stray prefix cannot ship unnoticed. `airphoto:` has no published
+# schema yet (crate#23), so nothing is required in `stac_extensions` for it.
+FIELD_PREFIXES = {
+    "proj": PROJECTION_EXTENSION,
+    "file": FILE_EXTENSION,
+    "processing": PROCESSING_EXTENSION,
+    "airphoto": None,
+}
 _MULTIHASH_SHA256 = "1220"
 
 
@@ -228,7 +239,12 @@ def _absent(value) -> bool:
 
 
 def build_properties(meta: dict) -> dict:
-    """`airphoto:`/`nge:` build properties for one window row, absent values omitted."""
+    """`airphoto:`/`processing:` build properties for one window row, absent values omitted.
+
+    The fly build is one string, `<version>+<sha>`: semver's build metadata, so
+    `processing:software` keeps its one-version-per-name shape. Either part
+    missing omits the whole entry rather than publishing half of it.
+    """
     props = {}
     for field, key in BUILD_PROPERTY_FIELDS.items():
         value = meta.get(field)
@@ -239,6 +255,11 @@ def build_properties(meta: dict) -> dict:
         elif field.startswith("shift_"):
             value = float(value)
         props[key] = value
+    fly_version, fly_sha = meta.get("fly_version"), meta.get("fly_sha")
+    if not (_absent(fly_version) or _absent(fly_sha)):
+        props["processing:software"] = {"fly": f"{fly_version}+{fly_sha}"}
+    if not _absent(meta.get("pipeline_sha")):
+        props["processing:version"] = meta["pipeline_sha"]
     return props
 
 
