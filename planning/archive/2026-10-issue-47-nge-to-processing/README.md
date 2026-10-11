@@ -22,4 +22,4 @@ diff against `data/stac` shows the rename and nothing else, every value equal;
 Mutation table: each of 8 guard removals turned 1 to 5 tests red (progress.md).
 Code-check: plan review + 3 rounds; round 1 one accepted finding, rounds 2 and 3 Clean.
 
-Closed by: PR (see branch 47-move-the-nge-item-fields-to-standard-or)
+Closed by: PR #48
