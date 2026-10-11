@@ -52,7 +52,7 @@ Decided at the plan gate (2026-10-10):
 - [x] Tests pass
 - [x] `/code-check` clean (each commit, or once over the branch with `/code-check branch`)
 - [x] PWF checkboxes match landed work
-- [ ] `/planning-archive` on completion
+- [x] `/planning-archive` on completion
 
 ## Out of scope
 - The `06_catalogue_*` backfill scripts (historical, not in the run path; they import only the `catalogue_*` helpers and compare live with backfilled-from-live)
