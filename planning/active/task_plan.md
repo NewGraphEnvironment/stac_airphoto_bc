@@ -38,23 +38,23 @@ Decided at the plan gate (2026-10-10):
 - [x] Restore the bug: put an `nge:` key back in a fixture, and drop `PROCESSING_EXTENSION` from 05, and confirm each guard fails
 
 ## Phase 4: Local proof (nothing published)
-- [ ] `uv run pytest tests/ -q` green
-- [ ] `uv run python scripts/05_stac_register.py --out <scratch>`, then a scratch script diffs every item against `data/stac`. Expected: only the 4 → 3 key swap with equal values, plus `stac_extensions` gaining processing. Count the items and report the total
-- [ ] `check_item(doc, Path("data/stac"))` on every scratch item: 0 problems, with tags checked against the real COGs
+- [x] `uv run pytest tests/ -q` green
+- [x] `uv run python scripts/05_stac_register.py --out <scratch>`, then a scratch script diffs every item against `data/stac`. Expected: only the 4 → 3 key swap with equal values, plus `stac_extensions` gaining processing. Count the items and report the total
+- [x] `check_item(doc, Path("data/stac"))` on every scratch item: 0 problems, with tags checked against the real COGs
 
 ## Phase 5: Docs, NEWS, issue
 - [x] `CLAUDE.md` (Architecture paragraph, the Build properties table) and `README.Rmd`, then re-render `README.md`. Check that the diff touches only that paragraph
 - [x] New `NEWS.md` with an entry for the unpublished change that names each old → new pair (saved filters stop matching), plus the `like '0.19.0+%'` note for filtering by fly version
-- [ ] Edit the #47 body so its Fields table records the decisions. Comment on crate#23 that this repo needs no new prefix, though `airphoto:` itself still has no schema
+- [x] Edit the #47 body so its Fields table records the decisions. Comment on crate#23 that this repo needs no new prefix, though `airphoto:` itself still has no schema
 
 ## Validation
 
-- [ ] Tests pass
+- [x] Tests pass
 - [ ] `/code-check` clean (each commit, or once over the branch with `/code-check branch`)
 - [ ] PWF checkboxes match landed work
 - [ ] `/planning-archive` on completion
 
 ## Out of scope
-- The `06_catalogue_*` backfill scripts (historical; their additive check would flag the dropped keys, and they are not in the run path)
+- The `06_catalogue_*` backfill scripts (historical, not in the run path; they import only the `catalogue_*` helpers and compare live with backfilled-from-live)
 - A crate schema for `airphoto:` (crate#23's remit)
-- Publishing: 05 → `04_s3_upload.R` → `stacs register --mode all` at the next rebuild
+- Publishing: `05 --require-all-published` → `04_s3_upload.R` → `stacs register --mode all` → `stacs verify` → no live `nge:` key → re-render `index.html` (CLAUDE.md, Build properties)

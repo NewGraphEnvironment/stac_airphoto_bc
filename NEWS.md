@@ -1,6 +1,6 @@
 # NEWS
 
-## Unreleased — publishes with the next rebuild
+## Unreleased — publishes with the next sync
 
 ### Item fields renamed (#47)
 
@@ -17,10 +17,10 @@ matching once the rebuild is published.
 | `nge:pipeline_sha` | `processing:version` |
 
 The fly build is one string, `<version>+<sha>` (semver build metadata), for
-example `{"fly": "0.19.0+0eeb977c3893"}`. To select every item built by one fly
-version, match the start of the `fly` entry (`0.19.0+`) rather than the whole
-value.
+example `{"fly": "0.19.0+0eeb977c3893"}`. The fly version is the part of that
+string before `+`, so a filter that compared `nge:fly_version` for equality has
+to compare the start of the `fly` entry instead.
 
-Values are unchanged, and so are the COGs: their tags keep the names
+The rename changes no value, and no COG: their tags keep the names
 `FLY_VERSION`, `FLY_SHA` and `PIPELINE_SHA`, so no `file:checksum` moves. Only
 item JSON changes.

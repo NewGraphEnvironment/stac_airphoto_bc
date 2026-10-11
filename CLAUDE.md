@@ -241,11 +241,20 @@ properties disagree.
 `nge:` is gone from items (#47; stac_pointcloud_bc#12 set the rule for the
 family). `stac_validate.py` refuses any property or asset field whose prefix is
 not in `airphoto_props.FIELD_PREFIXES`, or whose schema the item does not list
-in `stac_extensions`; `airphoto:` has no published schema yet (crate#23). The
-COG tags keep their names (`FLY_VERSION`, `FLY_SHA`, `PIPELINE_SHA`).
-The live items keep the `nge:` names until the next rebuild publishes 05's
-output; until then `stac_validate.py` refuses the items in `data/stac`, so any
-sync re-runs 05 first and publishes the rename with it.
+in `stac_extensions`. `airphoto:` has no crate schema: this catalogue alone writes
+it. The COG tags keep their names (`FLY_VERSION`, `FLY_SHA`, `PIPELINE_SHA`), so
+the rename moves no checksum.
+
+The live items keep the `nge:` names until the rename is published, and
+`stac_validate.py` refuses the `nge:` items in `data/stac`, so the next sync of any
+kind publishes it. Publish it whole, in this order:
+1. `05_stac_register.py --require-all-published`: 05 merges collection links, not item
+   bodies, so a run that rebuilds only some items leaves the rest as `nge:` on S3
+   beside the renamed ones;
+2. `04_s3_upload.R`, then `stacs register --mode all` and `stacs verify`;
+3. confirm no live item carries an `nge:` key;
+4. re-render the Pages site (`index.html`, README.Rmd's `build` chunk), which
+   describes the live items and so still names the `nge:` fields until then.
 
 `file:checksum` (sha256 multihash, `1220…`) and `file:size` on the `thumbnail`
 asset, file extension v2.1.0. The measured tables are imported from the private

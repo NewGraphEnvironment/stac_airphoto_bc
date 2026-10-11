@@ -221,8 +221,8 @@ PROCESSING_EXTENSION = "https://stac-extensions.github.io/processing/v1.2.0/sche
 
 # Every prefix an item may carry, on a property or an asset field, and the schema
 # that declares it. A field outside this set is refused (`stac_validate.py`), so a
-# renamed or stray prefix cannot ship unnoticed. `airphoto:` has no published
-# schema yet (crate#23), so nothing is required in `stac_extensions` for it.
+# renamed or stray prefix cannot ship unnoticed. `airphoto:` has no crate schema:
+# this catalogue alone writes it, so nothing is required in `stac_extensions` for it.
 FIELD_PREFIXES = {
     "proj": PROJECTION_EXTENSION,
     "file": FILE_EXTENSION,
@@ -236,6 +236,11 @@ def _absent(value) -> bool:
     # NaN is how pyarrow hands back a missing double; publishing it would put
     # `NaN` in JSON, which is not JSON.
     return value is None or (isinstance(value, float) and value != value)
+
+
+def _blank(value) -> bool:
+    # A run constant that is missing or empty: "" would publish a fly build of "+abc".
+    return _absent(value) or str(value) == ""
 
 
 def build_properties(meta: dict) -> dict:
@@ -256,9 +261,9 @@ def build_properties(meta: dict) -> dict:
             value = float(value)
         props[key] = value
     fly_version, fly_sha = meta.get("fly_version"), meta.get("fly_sha")
-    if not (_absent(fly_version) or _absent(fly_sha)):
+    if not (_blank(fly_version) or _blank(fly_sha)):
         props["processing:software"] = {"fly": f"{fly_version}+{fly_sha}"}
-    if not _absent(meta.get("pipeline_sha")):
+    if not _blank(meta.get("pipeline_sha")):
         props["processing:version"] = meta["pipeline_sha"]
     return props
 

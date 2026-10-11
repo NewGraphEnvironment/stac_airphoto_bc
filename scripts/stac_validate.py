@@ -8,11 +8,15 @@ Run by 04_s3_upload.R before anything is uploaded, and its `check_item()` by
 
 Per item whose thumbnail COG is on this machine:
   - `file:checksum` recomputed from the bytes on disk, and `file:size`
-  - the file extension declared
+  - the file extension declared, and every property and asset-field prefix in
+    `FIELD_PREFIXES` with its schema listed in `stac_extensions` (#47), so an
+    `nge:` key or any other stray prefix is refused
   - the build properties every item carries, as a NAMED set: a check that
     compares items with one another cannot see a key missing from all of them
   - the rotation keys on every film item, and the closed vocabularies
   - COG layout: IFDs before data, by offset rather than by the ghost header's claim
+  - the COG's tags against the item: `airphoto:` build fields, `FLY_VERSION`+`FLY_SHA`
+    against `processing:software`'s fly entry, `PIPELINE_SHA` against `processing:version`
 
 Items published before #23 are not on this machine and are not checked; the
 rebuild replaces them.

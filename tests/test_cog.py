@@ -229,7 +229,7 @@ def test_build_properties_puts_the_run_in_the_processing_extension():
 
 
 @pytest.mark.parametrize("missing", ["fly_version", "fly_sha"])
-@pytest.mark.parametrize("absent", [None, float("nan")])
+@pytest.mark.parametrize("absent", [None, float("nan"), ""])
 def test_a_fly_build_missing_either_part_is_omitted_not_half_written(missing, absent):
     meta = {"fly_version": "0.14.1", "fly_sha": "abc", "pipeline_sha": "def"}
     meta[missing] = absent
@@ -250,8 +250,9 @@ def test_every_required_build_property_is_produced_somewhere():
 # --- stac_validate: field names and the tags behind them (#47) --------------
 
 def _props(**extra) -> dict:
-    """Build properties of a publishable digital frame, nothing missing."""
-    return {"airphoto:media": "Digital - Colour", "airphoto:placement_source": "none",
+    """Properties of a publishable digital frame, nothing missing, core keys included."""
+    return {"datetime": "1968-07-15T00:00:00Z", "title": "695106 — bc5281_084 — 1968-07-15",
+            "airphoto:media": "Digital - Colour", "airphoto:placement_source": "none",
             "airphoto:shift_x_m_3005": 0.0, "airphoto:shift_y_m_3005": 0.0,
             "processing:software": {"fly": "0.19.0+0eeb977c3893"},
             "processing:version": "e16dd5307f57",
@@ -283,12 +284,20 @@ def test_an_asset_field_with_an_undeclared_prefix_is_refused():
     assets = {"flight_log": {"href": "https://x/y.jpg", "roles": ["metadata"],
                              "nge:kept": True}}
     problems = _field_problems(_doc(_props(), assets=assets))
-    assert any("nge:kept" in p and "flight_log" in p for p in problems), problems
+    # Only the stray: href, roles and the other core asset keys carry no prefix.
+    assert len(problems) == 1 and "nge:kept" in problems[0] and "flight_log" in problems[0], \
+        problems
 
 
 def test_processing_fields_without_the_extension_are_refused():
     problems = _field_problems(_doc(_props(), [PROJECTION_EXTENSION, FILE_EXTENSION]))
     assert any(PROCESSING_EXTENSION in p for p in problems), problems
+
+
+def test_proj_fields_without_the_projection_extension_are_refused():
+    problems = _field_problems(_doc(_props(**{"proj:epsg": 3005}),
+                                    [FILE_EXTENSION, PROCESSING_EXTENSION]))
+    assert any(PROJECTION_EXTENSION in p for p in problems), problems
 
 
 @pytest.mark.parametrize("software", [{}, {"gdal": "3.12.4"}, "0.19.0+abc"])
