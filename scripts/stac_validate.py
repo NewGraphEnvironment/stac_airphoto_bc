@@ -8,11 +8,15 @@ Run by 04_s3_upload.R before anything is uploaded, and its `check_item()` by
 
 Per item whose thumbnail COG is on this machine:
   - `file:checksum` recomputed from the bytes on disk, and `file:size`
-  - the file extension declared
+  - the file extension declared, and every property and asset-field prefix in
+    `FIELD_PREFIXES` with its schema listed in `stac_extensions` (#47), so an
+    `nge:` key or any other stray prefix is refused
   - the build properties every item carries, as a NAMED set: a check that
     compares items with one another cannot see a key missing from all of them
   - the rotation keys on every film item, and the closed vocabularies
   - COG layout: IFDs before data, by offset rather than by the ghost header's claim
+  - the COG's tags against the item: `airphoto:` build fields, `FLY_VERSION`+`FLY_SHA`
+    against `processing:software`'s fly entry, `PIPELINE_SHA` against `processing:version`
 
 Items published before #23 are not on this machine and are not checked; the
 rebuild replaces them.
@@ -26,6 +30,7 @@ from urllib.parse import unquote, urlparse
 sys.path.insert(0, str(Path(__file__).parent))
 from airphoto_props import (  # noqa: E402
     BUILD_PROPERTY_FIELDS,
+    FIELD_PREFIXES,
     FILE_EXTENSION,
     PLACEMENT_SOURCES,
     REQUIRED_BUILD_PROPERTIES,
@@ -62,6 +67,39 @@ def tags_disagree(path: Path, props: dict) -> list[str]:
             str(int(prop)) if isinstance(prop, float) and prop.is_integer() else str(prop))
         if tag != prop_text:
             out.append(f"COG tag {field.upper()}={tag!r} but item {key}={prop!r}")
+    # The run, stamped as tags under their window-column names (#47).
+    software = props.get("processing:software")
+    fly = software.get("fly") if isinstance(software, dict) else None
+    tag_fly = f"{tags.get('FLY_VERSION')}+{tags.get('FLY_SHA')}"
+    if fly != tag_fly:
+        out.append(f"COG tags FLY_VERSION+FLY_SHA={tag_fly!r} but item "
+                   f"processing:software fly={fly!r}")
+    if tags.get("PIPELINE_SHA") != props.get("processing:version"):
+        out.append(f"COG tag PIPELINE_SHA={tags.get('PIPELINE_SHA')!r} but item "
+                   f"processing:version={props.get('processing:version')!r}")
+    return out
+
+
+def fields_undeclared(doc: dict) -> list[str]:
+    """Property and asset-field prefixes outside `FIELD_PREFIXES`, or whose schema
+    the item does not list in `stac_extensions`.
+
+    Keys with no prefix are core STAC (`datetime`, `title`, `href`, ...).
+    """
+    extensions = doc.get("stac_extensions", [])
+    fields = [(key, "property") for key in doc.get("properties", {})]
+    for name, asset in doc.get("assets", {}).items():
+        fields += [(key, f"asset {name}") for key in asset]
+    out = []
+    for key, where in fields:
+        if ":" not in key:
+            continue
+        prefix = key.split(":", 1)[0]
+        if prefix not in FIELD_PREFIXES:
+            out.append(f"{where} field {key} has an undeclared prefix")
+        elif FIELD_PREFIXES[prefix] and FIELD_PREFIXES[prefix] not in extensions:
+            out.append(f"{where} field {key} without {FIELD_PREFIXES[prefix]} "
+                       f"in stac_extensions")
     return out
 
 
@@ -72,6 +110,7 @@ def check_item(doc: dict, stac_dir: Path = STAC_DIR) -> list[str]:
 
     if FILE_EXTENSION not in doc.get("stac_extensions", []):
         problems.append("file extension not declared")
+    problems.extend(fields_undeclared(doc))
 
     thumb = doc.get("assets", {}).get("thumbnail")
     if thumb is None:
@@ -93,6 +132,9 @@ def check_item(doc: dict, stac_dir: Path = STAC_DIR) -> list[str]:
     for key in REQUIRED_BUILD_PROPERTIES:
         if key not in props:
             problems.append(f"missing {key}")
+    software = props.get("processing:software")
+    if software is not None and not (isinstance(software, dict) and software.get("fly")):
+        problems.append(f"processing:software has no fly entry: {software!r}")
 
     film = str(props.get("airphoto:media", "")).startswith("Film")
     if film:

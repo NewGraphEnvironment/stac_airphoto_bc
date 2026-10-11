@@ -42,6 +42,8 @@ from airphoto_props import (  # noqa: E402
     CATALOGUE_PROPERTY_FIELDS,
     FILE_EXTENSION,
     METADATA_ASSET_FIELDS,
+    PROCESSING_EXTENSION,
+    PROJECTION_EXTENSION,
     build_properties,
     catalogue_assets,
     catalogue_properties,
@@ -259,7 +261,7 @@ def build_items(centroids: dict, build_by_id: dict, stac_dir: Path) -> list:
         # When the raster was produced: the COG's mtime, which 03_cog.py only moves
         # when the bytes change. Not "now" — that would rewrite every item JSON on
         # every run and date an unchanged raster to the day it was re-registered.
-        properties["nge:produced_datetime"] = datetime.fromtimestamp(
+        properties["processing:datetime"] = datetime.fromtimestamp(
             cog_path.stat().st_mtime, tz=timezone.utc).isoformat()
 
         roll = meta.get("film_roll", "")
@@ -277,8 +279,9 @@ def build_items(centroids: dict, build_by_id: dict, stac_dir: Path) -> list:
             properties=properties,
             assets=assets,
             stac_extensions=[
-                "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+                PROJECTION_EXTENSION,
                 FILE_EXTENSION,
+                PROCESSING_EXTENSION,
             ],
         )
         item.collection_id = COLLECTION_ID
