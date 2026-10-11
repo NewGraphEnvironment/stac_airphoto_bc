@@ -21,11 +21,11 @@ Decided at the plan gate (2026-10-10):
 **Consequence of the validator guard:** once this merges, `stac_validate.py` refuses the `nge:`-named items currently in `data/stac`. So any sync, including `04_s3_upload.R`, has to re-run 05 first, and that publishes the rename. That is the intended coupling: the rename rides with the next publish of any kind.
 
 ## Phase 1: Tests first (failing)
-- [ ] `tests/test_cog.py`: `build_properties()` gives `processing:software == {"fly": "0.14.1+abc"}` and `processing:version == "def"`, and no `nge:` key
-- [ ] `tests/test_cog.py`: `build_properties()` leaves out `processing:software` when either fly part is missing (it never writes `"0.14.1+None"`); the validator then refuses the item as missing it
-- [ ] `tests/test_cog.py`: update `test_every_required_build_property_is_produced_somewhere` so its leftover set is `{"processing:datetime"}`
-- [ ] `tests/test_cog.py`: `check_item()` refuses an item that carries any `nge:` key, or any property or asset field whose prefix is not declared (`proj`, `file`, `processing`, `airphoto`), and one that uses `processing:*` without declaring the processing extension
-- [ ] `tests/test_cog.py`: `tags_disagree()` on a tmp GeoTIFF whose `FLY_SHA` tag differs from the sha part of `processing:software["fly"]` reports the mismatch, and one whose `PIPELINE_SHA` differs from `processing:version` does too
+- [x] `tests/test_cog.py`: `build_properties()` gives `processing:software == {"fly": "0.14.1+abc"}` and `processing:version == "def"`, and no `nge:` key
+- [x] `tests/test_cog.py`: `build_properties()` leaves out `processing:software` when either fly part is missing (it never writes `"0.14.1+None"`); the validator then refuses the item as missing it
+- [x] `tests/test_cog.py`: update `test_every_required_build_property_is_produced_somewhere` so its leftover set is `{"processing:datetime"}`
+- [x] `tests/test_cog.py`: `check_item()` refuses an item that carries any `nge:` key, or any property or asset field whose prefix is not declared (`proj`, `file`, `processing`, `airphoto`), and one that uses `processing:*` without declaring the processing extension
+- [x] `tests/test_cog.py`: `tags_disagree()` on a tmp GeoTIFF whose `FLY_SHA` tag differs from the sha part of `processing:software["fly"]` reports the mismatch, and one whose `PIPELINE_SHA` differs from `processing:version` does too
 
 ## Phase 2: Writer (`scripts/airphoto_props.py`, `scripts/05_stac_register.py`)
 - [ ] `airphoto_props.py`: remove the `nge:` rows from `BUILD_PROPERTY_FIELDS`, leaving the `airphoto:` mapping only. `build_properties()` adds `processing:software` and `processing:version`. Rewrite the prefix comment block: `processing:` is now the ground shared with floodplains#74

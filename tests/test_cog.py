@@ -23,11 +23,15 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from airphoto_props import (  # noqa: E402
+    FILE_EXTENSION,
+    PROCESSING_EXTENSION,
+    PROJECTION_EXTENSION,
     REQUIRED_BUILD_PROPERTIES,
     build_properties,
     cog_layout_ok,
     file_meta,
 )
+from stac_validate import check_item, tags_disagree  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("cog", SCRIPTS / "03_cog.py")
 cog = importlib.util.module_from_spec(_spec)
@@ -215,9 +219,103 @@ def test_build_properties_types_and_omissions():
     json.dumps(p)  # no NaN reaches JSON
 
 
+def test_build_properties_puts_the_run_in_the_processing_extension():
+    p = build_properties({"placement_source": "none", "fly_version": "0.14.1",
+                          "fly_sha": "abc", "pipeline_sha": "def"})
+    # The fly build as semver build metadata: one string names the version and the commit.
+    assert p["processing:software"] == {"fly": "0.14.1+abc"}
+    assert p["processing:version"] == "def"
+    assert not [k for k in p if k.startswith("nge:")]
+
+
+@pytest.mark.parametrize("missing", ["fly_version", "fly_sha"])
+@pytest.mark.parametrize("absent", [None, float("nan")])
+def test_a_fly_build_missing_either_part_is_omitted_not_half_written(missing, absent):
+    meta = {"fly_version": "0.14.1", "fly_sha": "abc", "pipeline_sha": "def"}
+    meta[missing] = absent
+    p = build_properties(meta)
+    # Never "0.14.1+None" or "nan+abc": the validator refuses the item as missing it.
+    assert "processing:software" not in p
+    assert "missing processing:software" in check_item(_doc(p))
+
+
 def test_every_required_build_property_is_produced_somewhere():
     produced = set(build_properties({k: "x" for k in (
         "placement_source", "fly_version", "fly_sha", "pipeline_sha")} |
         {"shift_x_m_3005": 0, "shift_y_m_3005": 0}))
-    # produced_datetime is stamped by 05 from the COG's mtime, not from a window row.
-    assert set(REQUIRED_BUILD_PROPERTIES) - produced == {"nge:produced_datetime"}
+    # processing:datetime is stamped by 05 from the COG's mtime, not from a window row.
+    assert set(REQUIRED_BUILD_PROPERTIES) - produced == {"processing:datetime"}
+
+
+# --- stac_validate: field names and the tags behind them (#47) --------------
+
+def _props(**extra) -> dict:
+    """Build properties of a publishable digital frame, nothing missing."""
+    return {"airphoto:media": "Digital - Colour", "airphoto:placement_source": "none",
+            "airphoto:shift_x_m_3005": 0.0, "airphoto:shift_y_m_3005": 0.0,
+            "processing:software": {"fly": "0.19.0+0eeb977c3893"},
+            "processing:version": "e16dd5307f57",
+            "processing:datetime": "2026-09-29T08:52:35.374882+00:00", **extra}
+
+
+def _doc(props: dict, extensions=None, assets=None) -> dict:
+    return {"stac_extensions": extensions if extensions is not None else
+            [PROJECTION_EXTENSION, FILE_EXTENSION, PROCESSING_EXTENSION],
+            "properties": props, "assets": assets or {}}
+
+
+def _field_problems(doc: dict) -> list[str]:
+    # No thumbnail on disk in these fixtures; that problem is not the one under test.
+    return [p for p in check_item(doc) if p != "no thumbnail asset"]
+
+
+def test_a_publishable_items_fields_pass():
+    assert _field_problems(_doc(_props(**{"proj:epsg": 3005}))) == []
+
+
+@pytest.mark.parametrize("key", ["nge:fly_version", "nge:produced_datetime", "xyz:thing"])
+def test_a_property_with_an_undeclared_prefix_is_refused(key):
+    problems = _field_problems(_doc(_props(**{key: "x"})))
+    assert any(key in p and "undeclared" in p for p in problems), problems
+
+
+def test_an_asset_field_with_an_undeclared_prefix_is_refused():
+    assets = {"flight_log": {"href": "https://x/y.jpg", "roles": ["metadata"],
+                             "nge:kept": True}}
+    problems = _field_problems(_doc(_props(), assets=assets))
+    assert any("nge:kept" in p and "flight_log" in p for p in problems), problems
+
+
+def test_processing_fields_without_the_extension_are_refused():
+    problems = _field_problems(_doc(_props(), [PROJECTION_EXTENSION, FILE_EXTENSION]))
+    assert any(PROCESSING_EXTENSION in p for p in problems), problems
+
+
+@pytest.mark.parametrize("software", [{}, {"gdal": "3.12.4"}, "0.19.0+abc"])
+def test_processing_software_without_a_fly_entry_is_refused(software):
+    problems = _field_problems(_doc(_props(**{"processing:software": software})))
+    assert any("processing:software" in p for p in problems), problems
+
+
+def _tagged(path: Path, **tags) -> Path:
+    fly_like(path, rgba=False)
+    with rasterio.open(path, "r+") as ds:
+        ds.update_tags(**tags)
+    return path
+
+
+def test_tags_agreeing_with_the_processing_fields_pass(tmp_path):
+    cog_path = _tagged(tmp_path / "x.tif", FLY_VERSION="0.19.0", FLY_SHA="0eeb977c3893",
+                       PIPELINE_SHA="e16dd5307f57", PLACEMENT_SOURCE="none",
+                       SHIFT_X_M_3005="0", SHIFT_Y_M_3005="0")
+    assert tags_disagree(cog_path, _props()) == []
+
+
+@pytest.mark.parametrize("tag,value", [("FLY_VERSION", "0.18.0"), ("FLY_SHA", "ffffffffffff"),
+                                       ("PIPELINE_SHA", "000000000000")])
+def test_a_tag_disagreeing_with_the_processing_fields_is_reported(tmp_path, tag, value):
+    tags = dict(FLY_VERSION="0.19.0", FLY_SHA="0eeb977c3893", PIPELINE_SHA="e16dd5307f57",
+                PLACEMENT_SOURCE="none", SHIFT_X_M_3005="0", SHIFT_Y_M_3005="0")
+    tags[tag] = value
+    problems = tags_disagree(_tagged(tmp_path / "x.tif", **tags), _props())
+    assert any(tag in p for p in problems), problems
