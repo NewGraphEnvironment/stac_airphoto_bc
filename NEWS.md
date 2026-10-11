@@ -1,13 +1,14 @@
-# NEWS
+# stac_airphoto_bc
 
-## Unreleased — publishes with the next sync
+## v1.0.0 (2026-10-11)
 
 ### Item fields renamed (#47)
 
 The run provenance moves from `nge:` fields to the
 [processing extension](https://github.com/stac-extensions/processing) v1.2.0,
-which items now list in `stac_extensions`. A saved filter on an old name stops
-matching once the rebuild is published.
+which items now list in `stac_extensions`. A saved filter on an old name no
+longer matches. The `nge:`-named item JSONs are kept in
+`s3://stac-airphoto-bc/backup/items-20261010T175309/`.
 
 | was | now |
 |---|---|

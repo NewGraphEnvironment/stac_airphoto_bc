@@ -14,7 +14,7 @@ STAC pipeline for BC historical air photos — fetch, georef, COG, S3, STAC cata
 
 - 10,100 georeferenced thumbnail COGs, 1967–2019, rebuilt under #23 (published 2026-09-27) and again on fly 0.19.0 under #36 (published 2026-09-29), where grayscale became Gray + Alpha
 - Two regions: Neexdzii Kwa watershed (9,824) and three small southeast BC AOIs (276 unique)
-- 33.2 GiB of thumbnails on S3 (`s3://stac-airphoto-bc`, measured 2026-09-29). The pre-#23 collection and item JSONs are in `backup/*20260927T003819*`, the pre-#36 ones in `backup/*20260929T063100*`
+- 33.2 GiB of thumbnails on S3 (`s3://stac-airphoto-bc`, measured 2026-09-29). The pre-#23 collection and item JSONs are in `backup/*20260927T003819*`, the pre-#36 ones in `backup/*20260929T063100*`, the pre-#47 (`nge:`-named) ones in `backup/*20261010T175309*`
 - Registered on pgstac via `images.a11s.one`
 - GDAL metadata tags embedded in each COG (visible in QGIS)
 - STAC item titles: `airp_id — roll_frame — date`
@@ -245,16 +245,12 @@ in `stac_extensions`. `airphoto:` has no crate schema: this catalogue alone writ
 it. The COG tags keep their names (`FLY_VERSION`, `FLY_SHA`, `PIPELINE_SHA`), so
 the rename moves no checksum.
 
-The live items keep the `nge:` names until the rename is published, and
-`stac_validate.py` refuses the `nge:` items in `data/stac`, so the next sync of any
-kind publishes it. Publish it whole, in this order:
-1. `05_stac_register.py --require-all-published`: 05 merges collection links, not item
-   bodies, so a run that rebuilds only some items leaves the rest as `nge:` on S3
-   beside the renamed ones;
-2. `04_s3_upload.R`, then `stacs register --mode all` and `stacs verify`;
-3. confirm no live item carries an `nge:` key;
-4. re-render the Pages site (`index.html`, README.Rmd's `build` chunk), which
-   describes the live items and so still names the `nge:` fields until then.
+Published 2026-10-11 as v1.0.0: `05 --require-all-published`, `04_s3_upload.R`
+(item JSON only; the render check found the COGs byte-identical), `stacs register
+--mode all`, `stacs verify` in sync, and 0 of 10,100 API items with an `nge:` key.
+A change to item field names publishes the same way. 05 merges collection links,
+not item bodies, so a run that rebuilds only some items leaves the rest in their
+old shape on S3; `--require-all-published` refuses that.
 
 `file:checksum` (sha256 multihash, `1220…`) and `file:size` on the `thumbnail`
 asset, file extension v2.1.0. The measured tables are imported from the private
