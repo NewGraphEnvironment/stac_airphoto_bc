@@ -326,6 +326,522 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
 
 <!-- BEGIN SOUL CONVENTIONS — DO NOT EDIT BELOW THIS LINE -->
 
+
+# Agent Operating Rules
+
+How an agent session works here: clocks and waiting, subagents, evidence, and when to come
+back to the user. Sections 5–8 of `karpathy.md` until 2026-10-11. Worked commands
+and background, under the same headings, are in
+`~/Projects/repo/soul/conventions/reference/agent-operations.md`, which no `CLAUDE.md` loads.
+
+Citations sit in `<!-- evidence -->` blocks, which a repo's `CLAUDE.md` omits; the full text
+is in `conventions/agent-operations.md`. A new citation goes in its rule's block, and the
+remedy stays in the rule (`code-check.md`'s header; `/compact-prep` step 5).
+
+## 1. You Have No Clock Between Tool Calls
+
+**Every duration claim comes from `date`, never from how much waiting felt like
+it happened.**
+
+Background `sleep` returns immediately from the agent's side, and the number of
+times you have polled is not evidence of elapsed time. Two consecutive tool
+calls can be 15 seconds apart by the clock while feeling like ten minutes of
+waiting.
+
+**How to apply:** before saying *any* duration — "still running after N
+minutes", "this has been X a while", "longer than usual" — run `date -u` and
+subtract a real start time. `gh run list --json createdAt` gives it for CI. If a
+claim about slowness would change what the user does next, it needs a measured
+number or it does not get made.
+
+The same rule covers process state: `ps` and task-status listings have both been observed
+wrong. Check the artifact (an output file's size, its mtime, the service's own API), not the
+wrapper, and the file, not a link to it (`ls -lL`; §2, "Don't trust status").
+
+**Measure in UTC; report clock times to the user in Vancouver time, and name the zone.**
+An ETA or a "finished at" for the user reads `9:22 AM PDT`, not `16:22Z`; add UTC only when the
+exact instant matters. Convert with a tool, never by hand (PDT and PST alternate):
+`TZ=America/Vancouver date`, or the converter in the reference file for a given instant; keep
+an input's trailing `Z`, because a time with no offset is read as machine-local. Durations need
+no zone. Stored artifacts stay in UTC: commits, logs, filenames, `research/`, PR and issue bodies.
+
+*14 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### The same blind spot picks the wrong waiting tool
+
+Not having a clock also makes a **chain of background sleeps** feel like
+waiting when it is not. Pick the instrument by how many answers you need:
+
+| you need | use |
+|---|---|
+| one notification when a condition becomes true | `Bash(run_in_background)` with an `until` loop that exits, its probe local or the whole loop on the remote host |
+| one per state change, ending on its own | `Monitor` with a command that emits and then exits |
+| a value you must have before the next step | a **foreground** call, so the blocking is explicit |
+| a long job that notifies when it exits | `Bash(run_in_background)` with the command as plain foreground text: no `&`, no `nohup` |
+
+A repeated `sleep N; grep` is right in none of them. **Tell: if you are about to
+spawn a second waiter for the same thing, the first one was the wrong shape.**
+
+**An `until` waiter is only as good as the exit status its probe reads, and `ssh` to
+a Mac on the tailnet does not carry one:** it exits 0 whatever the remote command returned.
+Put the loop on the remote side and gate on what it prints, or test a probe's output, never
+its status (`code-check-shell.md`, "Over Tailscale SSH to a Mac, `ssh` exits 0").
+
+**And a waiter's notification is a wrapper's exit too.** Re-read the condition and the job's
+own state in a foreground call before reporting it done, against a marker only this run's end
+can produce: clear it at launch, or check it is newer than a stamp touched at launch
+(`code-check.md`, "A wrapper's exit is not the work"). A string grepped out of a log is weaker
+than either: a traced script writes it when it reads the line, and an `EXIT` trap prints it
+on failure.
+
+A `Monitor` filter must also match the failure states, not just the success
+one — silence looks identical to "still running", so a watcher that greps only
+for the happy path stays quiet through a crash.
+
+**Never end a backgrounded call's command with a trailing `&`.** A trailing `&` (or
+`nohup … &`) with nothing in the same command waiting on it, sent with `run_in_background`,
+lets the wrapper exit at once, so the notification reports **exit 0** whatever the job
+then does. Pick one mechanism from the table, never two.
+
+*20 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Don't edit files a long-running suite is still reading
+
+`devtools::test()` and its equivalents load each test file **when they reach it**,
+not at launch, so edits made mid-run are half-applied and the result describes a tree
+that never existed. **The tell is a moving denominator:** 3490 passes, then 3496, then
+3500, on "the same" tree. `Rscript file.R` parses incrementally too, and there the tell is
+a **syntax error quoting a line that does not exist**.
+
+Before a long run, commit. While it runs, do work that touches nothing it reads —
+issue bodies, PR text, reading, planning. If an edit cannot wait, kill the run
+rather than let it produce a result that has to be re-litigated. And when a long run
+fails, get the `file:line` before forming any theory: a mid-flight edit and a real
+regression look identical in a summary line.
+
+*9 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+## 2. Subagents Are Evidence, Not Dependencies
+
+**Spawn on your own judgment. Don't block on one. Don't trust its status. Verify its claims in both directions.**
+
+### Spawning is your call, not the user's
+
+Deciding to spawn a subagent is an engineering judgment, the same kind as choosing
+to write a test or run a grep. **Do not ask permission for it.** The user is usually not
+positioned to answer, and under **Always Away** the work stalls until they wake up, for an
+answer that was yours to make.
+
+This does not soften `karpathy.md` §1's asks — *"if uncertain, ask"*. Those are about
+**what the user wants**: intent, scope, an ambiguous requirement, a tradeoff only they can
+weigh. This is about **how you carry it out**. Ask about intent; decide about mechanism.
+
+#### Standing authorization: the harness bars the Agent tool by default on Opus 5
+
+Opus 5 sessions carry a hardcoded CLI instruction, *"Do not call the AgentTool unless the
+user requested it"*, which no local setting reaches. **The clause is conditional, so this
+convention is the request:** invoking a skill that mandates subagents (`/code-check`'s
+rounds, the Plan review in `planning.md`) **is** the user requesting them. Spawn them. This
+is a standing user instruction (airvine, 2026-08-29), for the mandated spawns only: the
+bounds below hold, and a workflow or deep-research fan-out still needs an explicit ask.
+
+**Spawn without asking** when a skill or convention mandates it, when you want fresh eyes on
+your own work, when a sweep will **locate** what matters faster than reading serially (then
+read directly whatever you will act on), or when independent items can run concurrently.
+**Do it yourself** when one grep answers it, or when the work depends on conversation context
+a subagent will not have. If you would sit idle waiting, spawn and keep working, or do it
+inline.
+
+**Bounds you enforce yourself, rather than converting into questions:**
+
+- **Two or three concurrent is the working default, and about five per task.** Bound both.
+  Past that total, **say so in your next message.**
+- **Do not let a subagent fan out again.** `Explore` and `Plan` cannot spawn;
+  `general-purpose` can, so put "do not spawn subagents" in its prompt.
+- Unnamed, delivering by file — `planning.md` carries the mechanics.
+- **Report after, not before.** Say what you spawned, and relay what it found — a subagent's
+  report never reaches the user on its own.
+
+**What is genuinely the user's call is budget, not mechanism.** Two or three reviewers is
+not that — it is just doing the work.
+
+*10 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Don't block
+
+Spawn a background subagent, then keep working on the lowest-risk part of the
+task — scaffolding, data files, tests. When findings arrive, treat them as a
+review of landed work rather than a precondition for starting it. If a result genuinely
+must precede the next step, run it synchronously (`run_in_background: false`) so the
+blocking is explicit and visible.
+
+*8 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Don't trust status
+
+**Never report an agent as stalled, or as still working, on status alone.** Agent
+status and `TaskList` have both been observed to be wrong, and a subagent's
+`tasks/<id>.output` is a symlink that `ls -l` reports as frozen; `ls -lL` follows it.
+Never read the transcript itself, it overflows the context. Even a growing transcript shows
+activity, not that a report will arrive. So decide nothing on it; wait for the event,
+against a clock:
+
+- **Note the spawn time with `date -u`** (§1) and wait for the completion notification, not a
+  file waiter. Until it arrives, the report is "spawned at T, no notification yet", never
+  "stalled". Keep working, outside the diff.
+- **Deadline:** 60 minutes from the spawn for a `/code-check` round; none for a background
+  Plan review. Check expiry by subtracting the spawn time from `date -u` at each wake; with
+  nothing else to do, one backgrounded `sleep <remaining>; echo DEADLINE` is the timer.
+- A replacement gets its own findings path, and is a spawn, so it counts toward the bound. The
+  original may still deliver: read whichever arrives, both if both do.
+
+**Never record a review as "Clean" on an idle notification.** The reviewer **writes its
+findings to a file and reports only the path**; a missing or empty file after the
+notification or the deadline means the round is re-run. Spawn reviewers unnamed: a named
+spawn idles instead of completing.
+
+*20 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Verify claims, in both directions
+
+Subagent output is evidence, not verdict: acting on a wrong finding and dismissing a late
+review wholesale both happen. **Cheap probe first, then act.** Reproduce the claim before
+you fix it, and before you dismiss it. A finding you cannot reproduce is a finding you do
+not yet understand.
+
+*5 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Fan out inside one process
+
+A workflow that shells out **once per item** costs one permission prompt per item; the same
+work **inside one process** costs one prompt total. An unattended run that stops for
+approval on item 3 of 200 has gone idle, and the wrapper reports nothing.
+
+- **Prefer one process doing N items over N processes doing one.** Loop inside the
+  language runtime; shell out once, for the batch.
+- Where a per-item subprocess is genuinely required, allowlist its command **before**
+  the run.
+- If a run keeps stopping for approval, look at whether the loop sits inside or outside
+  the process boundary before adding allowlist entries.
+
+*5 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### A subagent that must not know the answer must be a Plan or Explore type
+
+A `general-purpose` subagent carries the project's `CLAUDE.md`, and `Plan` and `Explore` do not, so a
+blind reader, a blind reviewer or any control that must not see prior results is spawned as `Plan` or
+`Explore`. Check it rather than trusting the brief: a canary of each type, given no tools and asked only
+whether its context mentions the term in question, settles it in seconds. Neither type can write, so take
+its output from the transcript by script, not by retyping, and audit the transcript's tool calls for reads
+outside what it was given.
+
+*4 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+---
+
+## 3. Evidence, Not Impressions
+
+**Measure before you characterise. Presence is not provenance. "Unknowable" is a
+claim.**
+
+### Measure before you characterise
+
+When a decision turns on **what something contains**, open it and count. Do not
+describe it from its structure, from an issue's claim about it, or from a tag list.
+A heading tells you a thing is *present*, never that it is *populated*.
+
+**A measurement carries the time it was taken.** One made earlier in the same session is not
+a current one, least of all for anything another session can change underneath it. For
+anything git-backed, `git fetch` first: reading a local clone and reporting it as the state of the world is the same error
+with a longer fuse. **And before hand-rolling a parser for a probe, check whether the code
+already has one**: a bespoke parser silently narrows the population it can see.
+
+*9 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### A share is not robust to an unresolved definition until you measure the spread
+
+When a result is expressed as a share, a ratio or a ranking and called "unaffected by
+whichever definition proves correct", **compute the statistic under each candidate
+definition and report the spread beside it.** If the spread is material against the claim
+being made, the definition is a blocker, so schedule it first. A share is invariant to a
+filter only when the filter is uncorrelated with the thing being measured.
+
+*20 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Presence is not provenance
+
+When something's **presence** is offered as evidence for **how it got there**, find
+the fact that actually discriminates. **Consistency is not support.** Before offering
+"X shows Y", ask what else would produce X. If anything would, X is not evidence. When the
+user pushes back on an inference, re-derive rather than defend.
+
+*12 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Documents that share an ancestor corroborate nothing
+
+Finding the same claim in three places is not triangulation if one was written from
+another. **The tell is agreement with no independent derivation.** Ask of each
+restatement: what did its author read? Prose repeats; code does not, so the discriminating
+check is almost always to read the thing the prose describes.
+
+- **A search engine's summary is not a source:** fetch the document it names and find the
+  sentence, or attribute the claim to the snippet.
+- **Derive every number in a release note from the artifact it describes**, not the issue.
+- **For "you can tell X by looking at Y", check that Y separates X from not-X.**
+- **A carve-out is a number too:** run the check over the population before writing it.
+- **Read the code behind a stated quantity or scope before repeating it;** when one instance
+  is stale, grep for the sentence, not the file.
+- **Treat `every`, `each`, `all N`, `nothing else`, `roughly doubles` and `between X and Y`
+  as words to check:** walk the per-member evidence before writing the quantifier. When review
+  keeps finding them, list every quantified or inherited claim with a measured verdict
+  (`code-check.md`, "A guard's scope, escape hatches, and remedies").
+
+*91 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### "It can only be answered by testing" is a claim with an author
+
+An issue or a colleague saying a question needs a field season, a device or a deploy
+is stating a claim, not a property of the problem. Spend the cheap probe first. Then
+**bound what the probe closed**: reading a desktop plugin says nothing about the mobile app.
+An over-claimed probe is worse than none.
+
+*10 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### A real bug is not necessarily the reported bug
+
+A defect found while investigating a symptom is **evidence, not the answer**. Before
+offering it as the cause, check that it produces *exactly* the symptom described,
+including the details that sound incidental. Write the reported symptom out and ask whether
+the proposed cause produces **all** of it, and say which parts are still unexplained: "this
+is a real bug and it may not be your bug" is honest and cheap.
+
+*5 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### An enumeration is not a checklist
+
+A probe listing what exists — subkeys present, columns found, files listed — answers
+"what is here", never "what do we want". Before a probe's output becomes work, grep for
+each item and ask whether anything consumes it. When it duplicates something already done
+another way, name the comparison.
+
+*3 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### A relative descriptor is meaningless without its anchor
+
+"Upstream", "downstream", "above", "below", "before", "after", "parent" — each is
+relative to something named **elsewhere in the document**. Resolve the anchor before
+drawing any inference from the term; getting it wrong produces a confident and specific
+wrong answer. **Where a source describes a sequence — crossings on a stream, releases in a
+changelog, stages in a pipeline, commits on a branch — write the order out before
+interpreting a single relative term in it.**
+
+*7 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### A safeguard whose mechanism is a human reading a diff is not a control
+
+When a design says "the writes are uncommitted, so the diff is the review", check
+whether anyone reads diffs. Here nobody does, so gate on **blast radius** instead: a write
+that reaches one repo just happens; a write that reaches every repo (a soul convention) may
+be appended to within its budget but edited or removed only through an issue. Where a real check is
+needed, make it mechanical — a grep for a contradicting rule, an assertion that nothing
+above the `CLAUDE.md` marker moved, a guard that resolves every heading against a base SHA.
+The user still wants a short, honest account of what was written: a report, not a review.
+
+*3 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Not finding it is not evidence it does not exist
+
+Before building a fetcher, harvester, backup or sourcing routine, **search the sibling
+packages for the verb** — enumerate the org's installed packages and grep their exports
+(the command is in the reference file), and list `~/Projects/repo/rtj/scripts/gis/`, where
+operational drivers live outside any package. **Then read the README ownership table and the
+above-marker `CLAUDE.md` of any package plausibly adjacent — exports understate remit.**
+
+**Tell:** you are about to write something whose name is a verb the ecosystem already does
+somewhere. Fetch, sync, harvest, backup, source, register, publish. **A function existing
+in two places is worse than it existing in neither**, and **check what the *architecture*
+says, not just what exists**: an issue that already assigned the boundary settles it.
+
+*26 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+#### The storage version: one store is not the world
+
+A negative result is only ever as wide as the store you looked in. **`aws s3` and `s3cmd`
+address different clouds and are invisible to each other**, so enumerate the stores before
+searching them, and prefer the job that stages data to whatever a bucket happens to hold.
+The same holds for **checkouts**: a local `grep` across `~/Projects/repo` answers a question
+about this disk. Use `gh api -X GET search/code -f q="org:NewGraphEnvironment <term>"`,
+which indexes **default branches only**: a file on a feature branch needs
+`gh api repos/<owner>/<repo>/contents/<path>?ref=<branch>`. `s3cmd ls` and `aws s3 ls` each
+list only their own provider's buckets; the backup script names the rest.
+
+*17 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+#### The temporal version: what you build against may be about to change
+
+**Before a design depends on a peer repo's artifact** (a guard comparing against its files,
+an extractor reading its output, automation keyed to its layout), **search the peer repo's
+open issues and PRs for work that changes it**, and read the body of each adjacent hit, not
+only its title. Unquoted words match anywhere; a quoted phrase must match exactly and misses
+rewordings. A full 100 rows means the list was cut: narrow the words.
+
+```bash
+gh search issues --include-prs --repo NewGraphEnvironment/<peer> --state open --limit 100 <artifact words>
+```
+
+*12 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+## 4. Decisions Up Front, Then Run
+
+**Ask at the plan gate. After approval, run to the PR. Before a plan exists, a question wants an answer.**
+
+The first three subsections are one rule on one axis — *when* to come back to the
+user — and they are only correct as a set. The rest decide what the user is handed when
+you do come back.
+
+### After plan approval, run every phase to the PR
+
+Plan approval is the authorization for every mechanical step after it. Run every
+phase, commit atomically per phase, archive the PWF, push, open the PR, and report
+**once**, at the end. Do not stop between phases to report progress. **The merge is a
+separate instruction** — *to the PR* ends at the open PR, and `/gh-pr-merge` runs when the
+user invokes it or the instruction says so.
+
+- **Inside it:** correcting the plan when a review disproves it (reported in the summary),
+  unless the correction is itself a fork of the kind below; filing issues, opening PRs and
+  editing bodies in NGE repos; pushing the feature branch. Blockers that cannot be resolved
+  are filed as issues and named in the final report rather than held open.
+- **Not inside it:** posting outside our repos (below), and anything a convention names as
+  its own gate — the merge, a change to the machine (`newgraph.md`), a push into an artifact
+  a human is testing on (`code-check.md`).
+
+*8 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Before a plan exists, a question wants an answer
+
+The same terseness that means "go" after approval means "answer me" before it. A
+turn that ends in a question mark, with no approved plan, gets an answer and a
+one-line offer of the work — not the first commit toward it. When the ask is to understand
+something, keep it short and concrete; a worked example beats a taxonomy. **The mandate
+starts at plan approval.**
+
+*4 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### What still interrupts, and where it goes
+
+A decision that permanently shapes stored data — a key, an identifier, a schema
+choice, a deprecation shim versus a hard rename — is the user's, and it goes to the
+**plan gate**, batched, as two or three concrete options with the recommended one
+first and the consequence stated. Found mid-run, it is still not the agent's to decide:
+ask it the same way — options, recommendation first, phone-answerable — commit, and
+continue on the phases that do not depend on it while the answer is outstanding
+(`planning.md`, "When Something Keeps Failing" — escalating is not stopping).
+
+In plan mode, collect the "this changes what I build" forks and ask them together before
+`ExitPlanMode`. Mechanism is never a question (§2), nor is anything with a conventional
+default: pick it, say so, move on.
+
+*4 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Never post outside our own repos without approval
+
+Never post to a venue outside NGE's own repositories without the user's explicit
+approval for that specific post — upstream GitHub issues and PR comments, mailing
+lists, forums, third-party trackers. **Drafting is welcome and expected**: write the
+comment, show it, wait. It is the sending that needs the word, because an upstream comment
+is published under the organisation's name, is indexed immediately, and cannot be
+unpublished.
+
+- Our own repos are unaffected; filing and editing issues there needs no asking.
+- **Reading upstream is unrestricted and worth doing.**
+- Offer the draft in the reply, and say plainly that nothing has been posted when the work
+  obviously produced something postable.
+
+*4 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Auto mode refuses a production write whatever the chat says
+
+Auto mode's classifier can refuse a command as a production write: a live store rewritten,
+a deploy, a publish. When it does, approval given in chat does not reach it, and in the
+recorded case a restart did not clear it either. On the **first** such refusal, say so once and offer two routes:
+the user leaves auto mode for that step (Shift+Tab) and approves the prompt, or runs the
+bare command themselves (below). Do not retry, and do not suggest a restart.
+
+It is not the secret-read clamp (`newgraph.md`, "Reading a secret clamps the rest of the
+session"), which names *earlier conversation content* and needs a restart. This refusal
+names a **category** of action, such as "Production Deploy".
+
+*10 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Hand the user bare commands
+
+When the user must run a command themselves — an interactive login, a
+sudo-needs-TTY operation, anything the Bash tool is blocked from running — give the
+**bare command**, in a fenced block, ready to paste. Never prefix it with `!`: on this
+operator's terminals it either does not run at all, or runs from `$HOME` rather than the
+session's working directory.
+
+- **Anchor every path**: absolute, or after `cd ~/Projects/repo/<repo> &&` on the same line.
+- Keep it paste-safe (`grep`/`awk` over a nested `python3 -c` in remote quotes), one command
+  per line, **short enough not to wrap**, and say what the first output line must read
+  (`PUBLISH run`), so a dropped flag shows before anything is written.
+
+**A file under `~/Downloads` may be unreadable by the agent process** (macOS folder
+protection, per app and per machine). Probe with
+`ls ~/Downloads >/dev/null 2>&1 && echo readable || echo blocked`; Desktop and Documents are
+granted separately, so probe each. If blocked, do not retry variants: ask for **one** copy
+into the repo, with absolute source and destination paths. Full Disk Access for the terminal
+app removes the block.
+
+*13 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Link every issue and PR you name to the user
+
+When a message to the user names an issue or a PR, make the number a link the user can
+click: `[repo#12](https://github.com/<owner>/<repo>/issues/12)`,
+`[repo PR #13](https://github.com/<owner>/<repo>/pull/13)`.
+
+- Issues under `/issues/N`, pull requests under `/pull/N`; when unsure, ask `gh` for the URL.
+- **Cross-repo references carry the repo** (`other#12`): a bare `#N` is a working link to the
+  wrong repo, and naming the collision in prose afterwards does not fix it; re-qualify the link.
+- Before sending a report with many numbers, spot-check two or three through `gh`: the ones
+  typed from memory or whose type you inferred.
+- Scope is messages to the user, and PR and issue bodies read from outside the repo; commit
+  messages autolink already.
+
+*7 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+### Surface upstream defects; do not work around them
+
+When a dependency or an external API misbehaves, surface it and ask rather than
+coding around it: a workaround hides the defect from whoever could fix it, and most of the
+dependencies in question are **first-party**, so a local patch leaves the bug in place for
+every other consumer. Same instinct as `newgraph.md`'s "install missing packages, don't
+workaround", applied to a *broken* dependency.
+
+**How to apply:** reproduce it minimally, file an issue in the owning repo with the
+repro and the exact lines, report it, and carry on if it is not blocking. The rule is
+*do not hide it*, not *do not continue*.
+
+*5 lines of evidence for this rule are in `conventions/agent-operations.md`.*
+
+# Code Check — Python
+Traps in Python: the interpreter, pytest, the HTTP stack under pystac, and MkDocs.
+
+*Index only: each rule's heading and first sentence. The full text is `~/Projects/repo/soul/conventions/code-check-python.md`; read it before writing or reviewing code in its area. `/code-check` loads it in full.*
+
+### A script named after a stdlib module shadows that module when run by path
+Name a script so it cannot collide with the standard library (`enum_sites.py`, not `enum.py`): run by path, its directory is first on `sys.path`, so every `import enum` in the process, `re`'s included, gets the script.
+
+### Proxy variables do not take a pystac test offline: block at the socket
+To make Python tests network-proof, patch the socket layer to refuse every non-loopback lookup and connection, in `pytest_configure`, and clear the proxy variables with `NO_PROXY=*`.
+
+### A conftest guard covers only the invocations that load it
+Put a session-wide guard in the repository's root `conftest.py`, and pin it by behaviour in a child process: pytest loads a conftest only for the paths it is given and their parents, so a guard in `tests/conftest.py` is absent from `pytest src/...`.
+
+### `mkdocs build --strict -q` passes a dead link
+Run `mkdocs build --strict` without `-q`, and set all seven `validation:` keys to `warn` in `mkdocs.yml`: `-q` raises the log level past WARNING, strict counts only the warnings it sees, and so it counts nothing.
+
 # Code Check — R
 Traps in R: the language and base/utils behaviour, package internals (`R CMD build`, `.Rbuildignore`, roxygen, lintr, `data-raw/`, testthat, pak), and the DBI/duckdb/arrow data layer.
 
@@ -351,6 +867,9 @@ A script that reads a file, transforms it, and writes it **back to the same path
 
 ### `download.file(quiet = TRUE)` never tells you the HTTP status — read it from `curl`
 Read an HTTP status from `curl::curl_fetch_disk()`'s `status_code`, never from `download.file()` messages, whose first warning unwinds a `tryCatch` before the status arrives and whose quiet error omits it.
+
+### A URL handed to a reader goes through R's 60 s connection timeout
+Download a large remote file to a `tempfile()` with httr2 or curl and read the copy, never `jsonlite::fromJSON(url)`, `readRDS(url(u))` or `read.csv(u)`: those read through an R URL connection, which stops at `getOption("timeout")` (60 s by default) however fast the bytes are arriving.
 
 ### `on.exit()` at a script's top level never fires
 - `on.exit()` registers a handler on the *current frame*.
@@ -433,6 +952,9 @@ Construct instants explicitly: a `Date` always becomes UTC midnight whatever `tz
 ### A `for` loop that builds `aes()` captures the loop variable lazily
 `aes()` quotes its arguments, so `aes(fill = lab[i])` is not evaluated until the plot is drawn — by which time `i` holds its **last** value.
 
+### ggplot2: forcing a legend key for an unused factor level
+Keep `drop = FALSE` on the scale and give the layer a named `show.legend` that also sets `FALSE` for each other legend: `drop = FALSE` alone lists the unused level with no glyph, and `show.legend = TRUE` stamps the layer's glyph into every other legend.
+
 ### `paste()` with a zero-length argument returns length ONE, not zero
 `paste0("x", character(0))` is `"x"`, so a key built per element gains one phantom member when the vector is empty; guard the empty case before building keys.
 
@@ -487,6 +1009,9 @@ A ~600-character free-text field in a `kable` cell wedged `pagedown::chrome_prin
 ### `stats::aggregate()` has three separate silent behaviours, and each fails in a different direction
 All three measured on R 4.5, all three met inside one 800-line script (drift#67).
 
+### `stats::mad()` is already scaled to an SD
+Use `stats::mad(x)` itself as the robust standard deviation, or `mad(x, constant = 1)` for the raw median absolute deviation: the default `constant = 1.4826` already scales it, so multiplying by 1.4826 again inflates the SD by half.
+
 ### `deparse(body(f))` excludes formal defaults, so a body scan cannot see a default
 A guard that scans function bodies for a forbidden literal is blind to that literal in a **signature**.
 
@@ -498,6 +1023,9 @@ Scan R source for non-ASCII the way `R CMD check` does (`tools:::.check_package_
 
 ### `tryCatch(warning = )` DISCARDS the value the expression produced
 A `warning =` handler is not a filter — it replaces the whole expression, so a call that **succeeded** and merely warned returns the handler's value and the result is thrown away.
+
+### Do not abort inside a handler for a warning raised from C++; note it and abort after the call returns
+Record a flag in the `withCallingHandlers()` handler, `invokeRestart("muffleWarning")`, and raise once the call has returned: for a warning from `Rcpp::warning()`, an abort from inside the handler longjmps through the C++ frames and skips their destructors.
 
 ### `match()` treats NA as a matchable VALUE, so two unknowns join to each other
 `match(NA, c("1", NA))` is **2**.
@@ -646,6 +1174,9 @@ Sum the bytes as doubles (`sum(as.numeric(raw[i + 1:4]) * 256^(0:3))`) to read a
 ### ajv honours keywords beside a `$ref`; Python's jsonschema ignores them
 Keep every `$ref` alone in a draft-07 schema tested with jsonvalidate and read by pystac.
 
+### `load_all()` runs every `.R` file at the top of a package's `data/` as a data script
+Keep helper and ad hoc scripts out of `data/`, which pkgload treats as package data, so `load_all()` sources any `data/*.R` it finds there.
+
 # Code Check — Shell
 Tool-level traps in bash, sed, git and `gh`, and in the host toolchain those commands depend on.
 
@@ -741,6 +1272,9 @@ Verify an upload by comparing each object's ETag with its file, and for a multip
 ### A verification command can be shadowed by a shell function or alias
 - The shell is initialized from the user's profile, so `diff`, `grep`, `ls`, `cat` and friends may resolve to a wrapper rather than the binary you assume.
 
+### `pwd` keeps typed case; key on `env pwd -P`
+Key on `env pwd -P`.
+
 ### psql does not interpolate `:'var'` inside a dollar-quoted string, and `\quit N` exits 0
 Two traps in the same file type, both of which read perfectly and fail at run time.
 
@@ -754,7 +1288,7 @@ Two traps in the same file type, both of which read perfectly and fail at run ti
 The harness applies an isolation guard to a session that entered a worktree: *"a worktree-isolated session's git operations must target its own worktree."*
 
 ### A `git filter-repo` seed carries the source repo's tags, and a path sed misses the language's path constructor
-Two traps from seeding one repo out of another's history (fish_passage_template_reporting#236, 2026-09-02), both silent.
+Two traps from seeding one repo out of another's history (2026-09-02), both silent.
 
 ### `git check-ignore -v` prints the matching pattern, and its exit status is not a per-file verdict
 `-v` reports the **last matching pattern**, negations included.
@@ -840,6 +1374,15 @@ Write `${1}` whenever the text after a backreference starts with a digit: Perl r
 ### `for x in $(cmd | grep … || true)` hides a failing `cmd`
 Assign the command on its own line under `set -e` (`out=$(cmd)`), then filter `out` with `|| true`.
 
+### A sed/awk range can run to EOF
+Never pipe a `sed`/`awk` range extract into an interpreter.
+
+### A Python CLI redirected to a log writes nothing until it exits, so the log cannot show progress
+Run a long Python command with `PYTHONUNBUFFERED=1` (or `python -u`) when its output goes to a file: stdout to a file is block-buffered, so the log stays at 0 bytes for the whole run and an empty log reads as a stalled job.
+
+### `aws s3` progress lines end in `\r`, so a line-based count of a saved log reads zero
+Translate before counting: `tr '\r' '\n' < log | grep -c '^upload:'`.
+
 # Code Check — Spatial
 terra, sf, bcdata, GDAL/OGR CLIs.
 
@@ -856,6 +1399,9 @@ If `bcdata::BBOX()` rejects a length-4 numeric bbox as not a length-4 numeric ve
 
 ### terra: operator dispatch and edge cases in package code
 - **SpatRaster `%in%` is not dispatched when terra is *imported* (only when *attached*).**
+
+### A classed abort raised while computing an argument to a terra S4 generic loses its class
+Compute an argument whose evaluation can abort before calling the terra generic: `pre <- f(); post <- g(); terra::cover(pre, post)`, never `terra::cover(f(), g())`.
 
 ### terra: `extract()` returns no row for ground beyond the raster, and counts cells by centre
 - Two traps in one call, and both make a partial result look complete.
@@ -926,8 +1472,8 @@ A `NULL` `data` argument does not error and does not warn — the layer inherits
 ### terra: `app()` calls a vector-tolerant `fun` once per CELL, and reads a 5-column return on a 5-column raster as transposed
 Two contracts inside `terra::app()` that read as the opposite of what they are, both measured on terra 1.9.34 (drift#9, 2026-09-05):
 
-### terra: `levels<-` and `coltab<-` copy before they strip; `set.cats(NULL)` is the in-place form
-`levels<-` and `coltab<-` deep-copy before stripping, so a caller-untouched test cannot fail under them; `terra::set.cats(r, layer = i, value = NULL)` strips in place and mutates whatever raster it is given, so use it on a copy you own.
+### terra: `levels<-` and `coltab<-` copy first; `set.cats()` mutates in place, setting or stripping
+`terra::set.cats()` mutates the raster it is given whether it strips (`value = NULL`) or sets levels; `levels<-` and `coltab<-` deep-copy first, so on a caller's raster call `set.cats()` only on the copy one of them returned, or on a `deepcopy()` you own.
 
 ### terra `metags()`: the empty case is `NULL`, and the sidecar is half the artefact
 Three measured facts about raster **container** metadata, all of which fail quietly (floodplains#83, 2026-09-05, terra 1.9.34 / GDAL 3.8.5).
@@ -961,6 +1507,9 @@ GDAL has two KML drivers and picks `KML` by default, which does not read the `<S
 
 ### GDAL applies `-srcnodata` and an alpha mask together, and the mask loses
 Two ways of saying "these pixels are not data" reach `gdalwarp` independently, and giving it both is not an error — it is an instruction to do both.
+
+### Check an alpha-masked raster by its mask flags, not its colorinterp
+Assert that rasterio's `ds.mask_flag_enums` is `[per_dataset, alpha]` on every image band, as an absolute check: `colorinterp[-1] == alpha` is a proxy, and a guard comparing output to source cannot see a NoData that overrides the alpha when both carry it.
 
 ### `parallel::mclapply()` over a remote raster aborts every fork on macOS, and the wrapper exits 0
 GDAL's curl handles do not survive a fork.
@@ -1007,8 +1556,11 @@ Pass `flat = TRUE` (with the interval in degrees) when densifying a lon/lat exte
 ### Planetary Computer STAC: a floodplain-scale read hits three limits a reach never does
 Query a large AOI by its convex hull, re-sign items before each tile, and give `datetime` explicit times (`…T00:00:00Z/…T23:59:59Z`).
 
-### gdalcubes reports failed chunk reads only on stderr, so a partial cube passes as complete
-Do not guard on it by capturing output.
+### gdalcubes records only a failed image OPEN; check `chunk_status`, and know what it misses
+Read the `chunk_status` variable of every `write_ncdf()` output with ncdf4 and abort on any value other than 0 or the netCDF int fill, and abort after the call returns on the R warning `could not be added to output`.
+
+### `gdalcubes::cube_view()` reads an aggregation or resampling it does not know as a default, with no error
+Validate `aggregation` and `resampling` against sets measured by round-tripping each value through `cube_view()`, not against `?cube_view`: an unknown aggregation silently becomes `"none"` and an unknown resampling `"near"`.
 
 ### terra reads a multi-variable gdalcubes NetCDF with its variables in alphabetical order
 Select layers by name after `terra::rast()` of a `gdalcubes::write_ncdf()` output, never by position.
@@ -1021,6 +1573,9 @@ Read with `promote_to_multi = FALSE` whenever a layer will be written back.
 
 ### `sf::st_make_valid()` rewrites geometry that was already valid
 Run it on the invalid rows only (`!st_is_valid(x)`), or keep the original geometry and use the made-valid copy just for the computation.
+
+### `st_union()` fails after `st_transform()` of a source mixing XY and XYZ rings
+Drop Z with `sf::st_zm()` before any `st_union()` or `st_combine()` on data that may mix XY and XYZ rings and has been through `st_transform()`: the union fails *"Points of LinearRing do not form a closed linestring"*, and `st_make_valid()` fails the same way.
 
 ### terra: `unique()` and `freq()` on a factor return its labels, not its codes
 Read a factor raster's codes from a copy with its levels stripped (`levels(y) <- NULL`), never from `terra::unique(x)[, 1]` or `terra::freq(x)$value`, which on a factor return the active category's labels.
@@ -1045,6 +1600,9 @@ To tell a throttle from any other bcdata failure, record the status off the requ
 
 ### sf and terra can link different GDALs, so a probe through one says nothing about the other
 Check `sf::sf_extSoftVersion()[["GDAL"]]` and `terra::gdal()` before concluding that "GDAL" cannot read something: one R session can hold two GDALs, and a driver or codec missing from one may be present in the other.
+
+### `arrow::write_parquet()` of a geoarrow table is not GeoParquet
+Write GeoParquet with GDAL's Parquet driver (`ogr2ogr -f Parquet`), and check the file's schema metadata carries a `geo` key: `geoarrow` (0.4.4) with `arrow::write_parquet()` writes geoarrow-native columns and no `geo` key, so GDAL reads the file with no CRS.
 
 ### `atan2(0, 0)` is 0, so two points at one place have a bearing of due north
 Treat a zero-length step as having no heading: test the step length before taking its azimuth, and return `NA` rather than a bearing when it is 0, because `atan2(0, 0)` returns 0 with no warning, and that reads as north.
@@ -1084,6 +1642,18 @@ Pass `terra::project()` a template grid, not just a CRS, when the result must re
 
 ### pystac `Collection.add_item()` rewrites the item's self href and fetches the root over the network
 Re-set the item's self href after `add_item()`, and call `collection.set_root(collection)` once its self href is set: the default layout rewrites the href to `<collection dir>/<id>/<id>.json`, and a root link naming a published URL is resolved by downloading it.
+
+### `pdist::pdist()` loses centimetres at projected coordinates
+Subtract a local origin before `pdist::pdist()`: at BC Albers magnitudes it returns 0 for points up to 7 cm apart.
+
+### FWA `upstream_route_measure` misses the next segment's start
+Take a segment's top from the next segment's `downstream_route_measure`, and compare measures from different sources within 1 mm.
+
+### FWA main flow is not edge type 1000 alone
+Select main flow with `edge_type IN (1000, 1050, 1200, 1250, 1450)`, and test what the layer is for rather than that it is non-empty: 1000 is single-line stream only, so a filter built on it draws no large river.
+
+### terra: `focal(na.rm = TRUE)` drops NA cells from the vote, so where you fill NA around a filter changes its output
+Fill NA with the value you mean (`ifel(is.na(x), 0L, x)`) **before** a `focal()` majority or min/max filter, not after it, whenever those cells should count.
 
 # Code Check Conventions
 Structured checklist for reviewing diffs before commit.
@@ -1233,7 +1803,7 @@ through to the **open PR** without stopping to report between phases — the mer
 step 7 is outside the mandate unless the instruction includes it; put the decisions that
 genuinely change what gets built at the plan gate, batched, with a recommendation
 first; report once when the PR is open. The rule, its boundary (before a plan
-exists, a question wants an answer) and its exceptions are `karpathy.md` §8.
+exists, a question wants an answer) and its exceptions are `agent-operations.md` §4.
 
 ## Re-read origin before you open the PR, not just before you cut the branch
 
@@ -1262,6 +1832,10 @@ useful question, which is *which body of work survives*. Ask, then re-land the d
 top of what shipped; two independent attempts at one problem are usually complementary
 rather than redundant, and a mechanical resolution keeps whichever half git preferred.
 
+When main only moved under you, with other work and no duplicate, bring it in with
+`git merge origin/main`, not a rebase: `progress.md` and the archive README cite the
+branch's commit SHAs, and a rebase rewrites every one they name (2026-10-12).
+
 ## Re-read the issue body before the baseline
 
 Re-fetch it and diff against the copy you planned from. An edit made during plan mode
@@ -1281,7 +1855,7 @@ Nothing downstream checks that the issue it names has anything to do with the co
 beside it.
 
 Measured 2026-09-08 in rtj. Work with no issue was branched as `322-sern-thompson-2026`
-on a guess, and four `rtj#322` citations went into a `project.yml` header and two
+on a guess, and four citations of that number went into a `project.yml` header and two
 shared-library comments. A parallel session then filed #322 — about a STAC registration
 script. Every citation was wrong, all four looked fine, and the real issue for the work
 (#319) went uncited until the merge.
@@ -1335,19 +1909,19 @@ The skip covers the **workflow**, never the **review**. Two questions, answered 
 Three things are exempt, each for a stated reason:
 
 - **Whitespace, and spelling inside a single word.** Changing a word changes what a rule
-  says, and soul#214's wrong claims each read correctly on their own.
+  says, and one batch's wrong claims each read correctly on their own.
 - **Commits a skill writes itself and gates mechanically**: `/gh-pr-merge`'s release
   bookkeeping, CLAUDE.md syncs, `CITATION.cff` refreshes.
 - **Commits from the skills built to run unattended**: `/compact-prep`'s capture commit
   of the working tree and its convention appends, and `/claude-memory-audit`'s writes to
   CLAUDE.md and `research/`. They are exempt for now, not reviewed, and a capture commit
-  can carry code. Whether they should get review is soul#359.
+  can carry code. Whether they should get review is an open issue.
 
 The review is the cheap half. Scaffolding costs a plan, a branch and an archive; a review
 costs a few reviewer agents, and its three-round floor stays, because small edits are
 exactly where its findings have come from.
 
-*7 lines of evidence for this rule are in `conventions/feature-workflow.md`, which `/code-check` reads in full.*
+*7 lines of evidence for this rule are in `conventions/feature-workflow.md`.*
 
 ## Skills That Slot In
 
@@ -1442,7 +2016,7 @@ This is the public-repo half of the rule that keeps project and client identifie
 public text. Both apply wherever the destination is public, whichever repo the session is
 running in.
 
-*7 lines of evidence for this rule are in `conventions/feature-workflow.md`, which `/code-check` reads in full.*
+*7 lines of evidence for this rule are in `conventions/feature-workflow.md`.*
 
 ## Why This Exists
 
@@ -1455,14 +2029,9 @@ We've hit snags repeatedly when half-doing this — branches that mix concerns, 
 <!-- Last synced: 2026-02-06 -->
 <!-- These principles are hardcoded locally. We do not curl at deploy time. -->
 <!-- Periodically check the source for meaningful updates. -->
+<!-- Only the upstream guidelines live here. NGE's own operating rules, once sections 5-8 of this file, are in agent-operations.md. -->
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
-
-Some rules here fence their citations in a `<!-- evidence -->` block, which a repo's
-`CLAUDE.md` omits and `/code-check` reads in full. A new citation goes inside that
-rule's block, creating one at the end of the rule if it has none; the remedy stays in
-the rule. `code-check.md`'s header states the rule once, and
-`skills/compact-prep/SKILL.md` step 5 carries the habit.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
@@ -1522,872 +2091,7 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## 5. You Have No Clock Between Tool Calls
-
-**Every duration claim comes from `date`, never from how much waiting felt like
-it happened.**
-
-Background `sleep` returns immediately from the agent's side, and the number of
-times you have polled is not evidence of elapsed time. Two consecutive tool
-calls can be 15 seconds apart by the clock while feeling like ten minutes of
-waiting.
-
-The failure is stating it out loud before checking. Observed 2026-08: a CI run
-was reported to the user as "pending for over an hour — unusually long, probably
-a stuck runner", after roughly eight background sleeps. One `date -u` showed the
-run was **three minutes old** and entirely normal. The whole diagnosis — stuck
-runner, duplicate triggers, something wrong with the workflow — rested on a
-duration that had been invented.
-
-**How to apply:** before saying *any* duration — "still running after N
-minutes", "this has been X a while", "longer than usual" — run `date -u` and
-subtract a real start time. `gh run list --json createdAt` gives it for CI. If a
-claim about slowness would change what the user does next, it needs a measured
-number or it does not get made.
-
-The same rule covers process state. `ps` and task-status listings have both been
-observed wrong; check the artifact (an output file's size, its mtime, the
-service's own API) rather than the wrapper — and check that the artifact is the
-file, not a link to it. A subagent's `tasks/<id>.output` is a **symlink**: `ls -l` and
-`stat` report the link, whose size is the length of the path it points to and whose
-mtime is the spawn time, so it looks frozen while the transcript behind it grows. Use
-`ls -lL` (§6, "Don't trust status").
-
-**Measure in UTC; report clock times to the user in Vancouver time, and name the zone.**
-An ETA, a "started at" or a "finished at" addressed to the user reads `9:22 AM PDT`, not
-`16:22Z`. Add the UTC time only when the exact instant matters: `9:22 AM PDT (16:22 UTC)`.
-Convert with a tool, never by hand, because PDT and PST alternate. `TZ=America/Vancouver date`
-gives the current time. For a given instant, use this, which needs only Python 3.9 or later:
-
-```bash
-python3 -c "import sys,datetime as d,zoneinfo as z; print(d.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).astimezone(z.ZoneInfo('America/Vancouver')).strftime('%-I:%M %p %Z'))" 2026-09-28T16:22:00Z
-```
-
-Keep the trailing `Z`, because a time with no offset is read as machine-local. Durations need
-no zone. Timestamps in stored artifacts stay in UTC: commit messages, logs, filenames,
-`research/`, and PR and issue bodies.
-
-*8 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### The same blind spot picks the wrong waiting tool
-
-Not having a clock also makes a **chain of background sleeps** feel like
-waiting when it is not. Observed 2026-08 on the same session as the above:
-roughly a dozen `sleep 570; check` background tasks were spawned to wait out a
-55-minute test suite and then CI. Two consecutive foreground checks printed the
-*same minute* — no wall time had passed between them, because the sleeps run
-detached and the polling happened around them rather than after them. Every one
-of those tasks was waste, and killing them produced a batch of eleven
-exit-code-144 notifications that read like failures.
-
-Pick the instrument by how many answers you need:
-
-| you need | use |
-|---|---|
-| one notification when a condition becomes true | `Bash(run_in_background)` with an `until` loop that exits, its probe local or the whole loop on the remote host |
-| one per state change, ending on its own | `Monitor` with a command that emits and then exits |
-| a value you must have before the next step | a **foreground** call, so the blocking is explicit |
-| a long job that notifies when it exits | `Bash(run_in_background)` with the command as plain foreground text: no `&`, no `nohup` |
-
-A repeated `sleep N; grep` is right in none of them. **Tell: if you are about to
-spawn a second waiter for the same thing, the first one was the wrong shape.**
-
-**An `until` waiter is only as good as the exit status its probe reads, and `ssh` to
-a Mac on the tailnet does not carry one.** Tailscale SSH runs the remote command under
-macOS `/usr/bin/login`, which waits for the command and then exits 0 whatever it returned, so
-`ssh host 'grep -q DONE run.log'` succeeds whether `DONE` is there or not, and
-`until ssh host '…'; do sleep 60; done` ends at its first probe and reports success. Put
-the loop on the remote side and gate on what it prints —
-`ssh -o ServerAliveInterval=30 host 'until test -e /tmp/run.done; do sleep 60; done; echo FOUND'`
-— or test a probe's output, never its status (`code-check-shell.md`, "Over Tailscale SSH
-to a Mac, `ssh` exits 0"). The local loop itself is sound: its sleeps run 60 s apart and it
-outlives the Bash tool's 10-minute timeout.
-
-**And a waiter's notification is a wrapper's exit too.** When it fires, re-read the
-condition and the job's own state in a foreground call before reporting the job done. The
-marker must be something only this run's end can produce: clear it at launch, or check it
-is newer than a stamp touched at launch (`code-check.md`, "A wrapper's exit is not the
-work"). A string grepped out of a log is weaker than either, because a traced script writes
-the marker into the log when it reads the line that will print it, and an `EXIT` trap
-prints it on failure.
-
-*8 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-A `Monitor` filter must also match the failure states, not just the success
-one — silence looks identical to "still running", so a watcher that greps only
-for the happy path stays quiet through a crash.
-
-**Never end a backgrounded call's command with a trailing `&`.** A trailing `&` (or
-`nohup … &`) with nothing in the same command waiting on it, sent with `run_in_background`,
-lets the wrapper exit at once, so the notification reports **exit 0** whatever the job
-then does: once it killed the job, and in another session the job ran to completion. Either
-way the notification says nothing about the job. Pick one mechanism from the table, never
-two. A `&` whose job the same command goes on to wait for, as in `with_deadline()`
-(`code-check-shell.md`), is not this, and nor is the `nohup … &` fix in that file's
-"`&` binds to the whole `&&` list" rule when the call itself is not backgrounded.
-
-*5 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### Don't edit files a long-running suite is still reading
-
-`devtools::test()` and its equivalents load each test file **when they reach it**,
-not at launch. A 30-minute run therefore reads whatever is on disk at that moment,
-so edits made mid-run are half-applied and the result describes a tree that never
-existed.
-
-Cost two full Docker suites (~1 hour) on rfp#178, both reporting `FAIL 1`. The
-failure was a test written *during* the run, executing against source from *before*
-the fix that made it pass — nearly reported as a regression. **The tell is a moving
-denominator:** 3490 passes, then 3496, then 3500, on "the same" tree.
-
-Before a long run, commit. While it runs, do work that touches nothing it reads —
-issue bodies, PR text, reading, planning. If an edit cannot wait, kill the run
-rather than let it produce a result that has to be re-litigated. And when a long run
-fails, get the `file:line` before forming any theory: a mid-flight edit and a real
-regression look identical in a summary line.
-
-**It is not only test runners.** `Rscript file.R` parses incrementally too, so editing
-any long-running script mid-run resumes the parser at a byte offset into shifted
-content. The tell is different and worse: a **syntax error quoting a line that does not
-exist**, which reads as a defect in code that is fine. The moving-denominator tell above
-needs two runs to see; this one arrives looking like an answer.
-
-*6 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-## 6. Subagents Are Evidence, Not Dependencies
-
-**Spawn on your own judgment. Don't block on one. Don't trust its status. Verify its claims in both directions.**
-
-### Spawning is your call, not the user's
-
-Deciding to spawn a subagent is an engineering judgment, the same kind as choosing
-to write a test or run a grep. **Do not ask permission for it.**
-
-The user is usually not positioned to answer. Knowing whether a fan-out beats a
-sequential read requires knowing the shape of the work — which you have and they do
-not, so the question forces them to guess at a technical call. Under **Always Away**
-it is worse than useless: the work stalls until they wake up, for an answer that was
-yours to make. *"I wouldn't be in the know enough to know when that is"*
-(airvine, 2026-08-27) is the whole problem in one line.
-
-This does not soften §1's asks — *"if uncertain, ask"* and *"if something is unclear,
-stop and ask"*. Those are about **what the user wants**: intent, scope, an ambiguous
-requirement, a tradeoff only they can weigh. This is about **how you carry it out**.
-Ask about intent; decide about mechanism. A question starting "should I use…" is
-almost always the second kind, and almost always yours to answer.
-
-#### Standing authorization: the harness bars the Agent tool by default on Opus 5
-
-Sessions on Opus 5 carry a hardcoded instruction from the CLI itself —
-*"Do not call the AgentTool unless the user requested it"* — alongside the same
-line for workflows and deep-research. It is not a setting anyone here
-misconfigured, and **it cannot be turned off locally**: the string is a literal in the
-CLI bundle, gated by remote config. Nothing in `~/.claude/settings.json` reaches it, so
-do not spend a turn looking there.
-
-The symptom is a skill quietly doing less than it says: `/code-check` reporting
-*"the subagent rounds did not run — your session instruction bars the Agent
-tool"*, which is the review the command exists to perform. It reads as a
-configuration problem, so the fix gets looked for in the wrong place.
-
-**The clause is conditional, so this convention is the request.** Invoking a
-skill that mandates subagents — `/code-check`'s three rounds, the Plan review in
-`planning.md` — **is** the user requesting them. Spawn them. This paragraph is a
-standing user instruction, written for exactly that purpose (airvine,
-2026-08-29), and CLAUDE.md project instructions override default behaviour by
-their own terms.
-
-It authorizes the mandated spawns and nothing wider: the bounds in this section
-still hold — two or three concurrent, about five per task, no fan-out from a
-child — and a workflow or deep-research run fanning out dozens of agents remains
-a spending decision that needs an explicit ask.
-
-**Spawn without asking when:**
-
-- A skill or convention mandates it — `/code-check`'s review rounds, the Plan review
-  in `planning.md`. That decision is already made; re-asking it is friction carrying
-  no information.
-- You want fresh eyes on your own work. The mechanism and the measurements behind it
-  are in `code-check/SKILL.md`.
-- A sweep over many files will **locate** what matters faster than reading serially.
-  The sweep finds candidates; it does not replace the read — `planning.md` is
-  explicit that agents sometimes report existing files as absent, so read directly
-  whatever you are going to act on.
-- Independent items can run concurrently and nothing downstream needs them ordered.
-
-**Do it yourself when:**
-
-- One grep answers it.
-- The work depends on conversation context a subagent will not have.
-- You would sit idle waiting — spawn and keep working, or do it inline.
-
-**Bounds and defaults you enforce yourself, rather than converting into questions:**
-
-- **Two or three concurrent is the working default, and about five per task** is
-  where spend stops being incidental. Concurrency and cumulative total are different
-  quantities — `/code-check`'s three rounds plus a Plan review plus an ad-hoc sweep
-  never exceeds three at once while spending well past a handful. Bound both.
-- Past that total, **say so in your next message.** An escape you grant yourself
-  silently is not a bound; it has to land in front of the user, after the fact.
-- **Do not let a subagent fan out again.** Intent does not enforce this — the child
-  decides what it calls — so use the structure: the `Explore` and `Plan` types are
-  defined without the `Agent` tool and *cannot* spawn. `general-purpose` can, so when
-  you use it (as `/code-check` does), put "do not spawn subagents" in the prompt. The
-  one case on record (see "Don't block" below) never had a root cause established, which
-  is exactly why this bound is structural rather than advisory.
-- Unnamed, delivering by file — `planning.md` carries the mechanics.
-- **Report after, not before.** Say what you spawned, and relay what it found (per
-  `code-check/SKILL.md` — a subagent's report never reaches the user on its own). A
-  user can object to a spawn that already happened; they cannot usefully approve one
-  that has not.
-
-**What is genuinely the user's call is budget, not mechanism.** A workflow or
-deep-research run fanning out dozens of agents is a spending decision and needs an
-explicit ask. Two or three reviewers is not — that is just doing the work.
-
-The cost of a review is the visible half and the benefit is not. Two reviewers over one
-conventions draft returned **20 findings** and caught **six** false factual claims in it.
-None of that happens if the spawn waits on a user who is away.
-
-*9 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### Don't block
-
-Spawn a background subagent, then keep working on the lowest-risk part of the
-task — scaffolding, data files, tests. When findings arrive, treat them as a
-review of landed work rather than a precondition for starting it.
-
-If a result genuinely must precede the next step, run it synchronously
-(`run_in_background: false`) so the blocking is explicit and visible.
-
-Three observed cases where waiting would have been the expensive choice:
-
-- A research agent spawned 5 children and deadlocked for **~3 hours**, still
-  reporting as "running". The user caught it, not the agent.
-- A `Plan` agent asked to review a `task_plan.md` *before the baseline commit*
-  returned after the issue was implemented, reviewed, merged and tagged.
-- The same pattern on a later issue: findings arrived after all four phases had
-  shipped. Because the work had not waited, this cost nothing — three findings
-  were still new and landed as follow-up commits.
-
-That last one is the shape to aim for. Concurrent review is not a degraded
-version of blocking review; it is often better, because the reviewer reads real
-code instead of a plan.
-
-### Don't trust status
-
-**Never report an agent as stalled, or as still working, on status alone.** Agent
-status and `TaskList` have both been observed to be wrong — `TaskList` reported "No
-tasks found" for an agent that was alive and later replied. The evidence that does
-exist is easy to misread: a subagent's `tasks/<id>.output` is a symlink, and `ls -l`
-reports the link — a size equal to the length of its target path, an mtime equal to
-the spawn time — so a working reviewer reads as frozen. A reviewer was called stalled
-"at 141 bytes" on exactly that, and returned minutes later with the best finding of
-its branch. `ls -lL` follows the link to the transcript, whose size grows with every
-step; never read the transcript itself, it overflows the context.
-
-Even a growing transcript shows activity, not that a report will arrive. So decide
-nothing on it; wait for the event, against a clock:
-
-- **Note the spawn time with `date -u`** (§5), and wait for the completion
-  notification, which is the event. Do not build a file waiter for a subagent
-  (`until [ -s review.md ]`): it fires on the first byte, and on whichever reviewer
-  writes a shared path first. Until the notification arrives, the true report is
-  "spawned at T (in Vancouver time, §5; subtract in UTC), no notification yet", adding "transcript growing" only if `ls -lL`
-  showed it grow between two looks — never "stalled".
-- **Set a deadline and act only on its expiry.** For a `/code-check` round, 60 minutes
-  from the spawn. Rounds taking 30 to 43 minutes are on record, and every one of them
-  returned. You have no clock, so check expiry by subtracting the spawn time from
-  `date -u` at each wake. When there is nothing else to do, one backgrounded
-  `sleep <remaining>; echo DEADLINE` is the timer. A background Plan review has no
-  deadline, because the work does not wait on it (`planning.md`); one run
-  synchronously on purpose blocks in the open and needs none.
-- **Meanwhile, keep working, outside the diff.** The reviewer reads the files you
-  would be editing.
-- **A replacement gets a new findings path, and the original keeps its own.** The
-  original may still deliver, and it may deliver the best finding of the branch; read
-  whichever arrives, both if both do. A replacement is a spawn, so it counts toward the
-  bound above.
-
-**And never record a review as "Clean" on the strength of an idle notification.**
-From the parent's side an idle ping is indistinguishable from an agent that had
-nothing to say, so a lost review reads as a pass — a whole `/code-check` pass was once
-reported as finding nothing while three reviews were stranded, one of which had found
-a data-loss bug (measured 2026-08-25; the numbers are in `planning.md`, "Spawn review
-agents UNNAMED"). Passing `name` turns a spawn into a persistent teammate that idles
-instead of completing; pass it only for a collaborator you will keep messaging, and
-shut it down when done. The rule that survives either spawn shape:
-the reviewer **writes its findings to a file and reports only the path**, and a
-missing or empty file **after the completion notification, or once the deadline above
-has passed,** means the round produced nothing and is re-run — never "Clean". Before
-either, a missing file is a round still in flight. `planning.md` carries the
-mechanics; `code-check/SKILL.md` applies them.
-
-*15 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### Verify claims, in both directions
-
-Subagent output is evidence, not verdict. Both failure modes are real:
-
-- **Acting on a wrong finding.** One labelled BLOCKER — "`glue()` will choke on
-  the literal braces in this fragment" — was disproved by a 30-second probe,
-  because glue does not re-parse interpolated values. Acting on it would have
-  meant rewriting a working generator.
-- **Dismissing a late review wholesale.** In that same review 2 of 9 findings
-  were real, including a dead link. In a later one, a finding that a
-  `path|layername=` check would delete KML/GPX layers was correct, and was
-  confirmed against 207 real datasources before the fix landed.
-
-The rule that separates them: **cheap probe first, then act.** Reproduce the
-claim before you fix it, and before you dismiss it. A finding you cannot
-reproduce is a finding you do not yet understand.
-
-### Fan out inside one process
-
-A workflow that shells out **once per item** costs one permission prompt per item,
-unless the command happens to be allowlisted. The same work done **inside one
-process** costs one prompt total, and nothing says so until the run is already
-going. Measured 2026-09-04 (knowledge#4): a harvest script issuing two `curl` calls
-per report inside each subagent meant hundreds of approvals across a run — the user
-had flagged it as *"a big time suck last time"* without knowing the cause — while a
-sibling script doing the same fetch-download-upload work with Python `urllib` in a
-single process cost **one** prompt for the entire run. Same task, same volume, three
-orders of magnitude apart in interruptions.
-
-It breaks **Always Away** directly: an unattended run that stops for approval on item
-3 of 200 has not failed loudly, it has gone idle, and the wrapper reports nothing.
-
-- **Prefer one process doing N items over N processes doing one.** Loop inside the
-  language runtime; shell out once, for the batch.
-- Where a per-item subprocess is genuinely required, allowlist its command **before**
-  the run, not one refusal at a time during it — the allowlist fixes the commands you
-  predicted, and the one that blocks is the one you did not.
-- Diagnostic: if a run keeps stopping for approval, look at whether the loop sits
-  inside or outside the process boundary before adding allowlist entries.
-
-### A subagent that must not know the answer must be a Plan or Explore type
-
-A `general-purpose` subagent carries the project's `CLAUDE.md`, and `Plan` and `Explore` do not, so a
-blind reader, a blind reviewer or any control that must not see prior results is spawned as `Plan` or
-`Explore`. Check it rather than trusting the brief: a canary of each type, given no tools and asked only
-whether its context mentions the term in question, settles it in seconds. Neither type can write, so take
-its output from the transcript by script, not by retyping, and audit the transcript's tool calls for reads
-outside what it was given.
-
-*4 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
 ---
-
-## 7. Evidence, Not Impressions
-
-**Measure before you characterise. Presence is not provenance. "Unknowable" is a
-claim.**
-
-The principles below all fail the same way: something *feels* established — because
-it is visible, because it is present, because someone said so — and gets offered
-with the confidence of a measurement.
-
-### Measure before you characterise
-
-When a decision turns on **what something contains**, open it and count. Do not
-describe it from its structure, from an issue's claim about it, or from a tag list.
-A heading tells you a thing is *present*, never that it is *populated* — an empty
-`<conditionalstyles/>` and one with rules look identical in a list of child names.
-
-Four instances in one rfp session, each corrected by the user's follow-up question
-rather than by review: a tradeoff described as three times its real size; an issue's
-stale claim repeated as current; an installed version reported as sixteen releases
-behind when a parallel session had updated it eighteen minutes earlier; and "nothing
-on main addresses this" from a local `main` three commits behind — one `git fetch`
-away from the truth.
-
-**A measurement carries the time it was taken.** One made earlier in the same
-session is not a current one, least of all for anything another session can change
-underneath it. For anything git-backed, `git fetch` first: reading a local clone and
-reporting it as the state of the world is the same error with a longer fuse.
-
-**And before hand-rolling a parser for a probe, check whether the code already has
-one.** A bespoke parser silently narrows the population it can see, and the result
-looks like a measurement rather than a sample — worse than not measuring, because it
-carries a number. Measured 10 of 80 with a hand-written matcher; routed through the
-package's own resolver it was 14 of 117.
-
-### A share is not robust to an unresolved definition until you measure the spread
-
-When work is blocked on a definition nobody has settled, it is tempting to express the
-result as a share, a ratio or a ranking and call it "unaffected by whichever definition
-proves correct". That is a claim, and usually one command checks it: **compute the statistic under each candidate
-definition and report the spread beside it.** If the spread is material against the claim
-being made, the definition is a blocker, so schedule it first. A share is invariant to a
-filter only when the filter is uncorrelated with the thing being measured. Check that; do
-not assume it.
-
-*13 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### Presence is not provenance
-
-When something's **presence** is offered as evidence for **how it got there**, find
-the fact that actually discriminates. A QGIS project's `3.30.1` stamp was offered as
-evidence a desktop had opened it — but the template it was copied from carries that
-stamp, so a never-opened project reads the same. What actually proved it was a
-tracking key the template does not contain.
-
-The tell: reaching for the *most visible* fact rather than the *discriminating* one,
-because the visible fact is consistent with the conclusion. **Consistency is not
-support.** Before offering "X shows Y", ask what else would produce X. If anything
-would, X is not evidence.
-
-When the user pushes back on an inference, re-derive rather than defend. The
-conclusion often survives; the reasoning that reaches it is usually different.
-
-*9 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### Documents that share an ancestor corroborate nothing
-
-Sibling of the rule above, one level out: there a *fact* was consistent with the
-conclusion, here several *documents* are. Finding the same claim in three places
-feels like triangulation and is not — if one was written from another, they are one
-source wearing three hats, and the agreement is a copy, not a confirmation.
-
-**The tell is agreement with no independent derivation.** Ask of each restatement:
-what did its author read? If the answer is "one of the others", the count is one.
-Prose repeats; code does not, so the discriminating check is almost always to read
-the thing the prose describes.
-
-**The release note is where this costs the most, because its readers cannot check it.**
-Where a release note is written from the issue rather than from the artifact, its numbers
-have been copied rather than derived, and no reader is positioned to notice.
-
-Habits:
-
-- **Derive every number in a release note from the artifact it describes**, at the moment you
-  write it. Not from the issue, not from the last release's notes, not from memory.
-- **For any sentence of the form "you can tell X by looking at Y", check that Y actually
-  separates X from not-X.** A discriminator that fires on everything discriminates nothing,
-  and it reads as helpful right up until someone relies on it. A checksum over a re-encoded
-  artifact is the standing example: it answers "are my bytes current" and can never answer
-  "did the values change".
-- **A carve-out is a number too, and reasoning one from the shape of a literal understates
-  it.** Run the check over the population before writing the exception. A literal naming two
-  excluded items does not mean every other input is covered: it names *two*, so a one-item
-  tree is always missing at least one of them — including each of those two, which are
-  missing each other — and the coverage is **zero for every one-item tree**, not merely
-  capable of being zero. That error runs in the direction that understates the reach of a
-  defect, in the document a reader uses to decide whether to backport.
-- **When a document states a quantity or a scope, read the code that produces it
-  before repeating it.** Especially a status section — it describes a moment, and
-  nothing fails when the moment passes.
-- **When you find one instance stale, grep for the sentence, not the file.** A claim that
-  sits in three documents is not fixed by repairing the one that was quoted; the other two
-  still read as authoritative.
-- **A summary sentence over a set is a failure site of its own, even when every number under
-  it is right.** It gets written from the memory of a correct measurement rather than
-  re-derived from it, and it errs toward the tidier claim. Treat `every`, `each`, `all N`,
-  `nothing else`, `roughly doubles` and `between X and Y` as words to check, not words to
-  write. Walk the per-member evidence before writing the quantifier. When review keeps finding
-  these, a list of every quantified or inherited claim in the document, each with a measured
-  verdict, ends the loop (`code-check.md`, "A guard's scope, escape hatches, and remedies").
-
-*61 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### "It can only be answered by testing" is a claim with an author
-
-An issue or a colleague saying a question needs a field season, a device or a deploy
-is stating a claim, not a property of the problem. Spend the cheap probe first.
-
-rfp#186 opened with "three questions decide whether this is viable, and none can be
-answered by reading." Two fell in about twenty minutes — one to reading a call
-graph, one to re-reading a file already on disk — turning "run a field season, then
-decide what to build" into "build it, then confirm one thing."
-
-The claim is usually made by someone who knows the domain, at a moment before they
-looked. Not wrong so much as **unexamined**, which is what lets it survive into the
-plan. Then **bound what the probe closed**: reading a desktop plugin says nothing
-about the mobile app. An over-claimed probe is worse than none.
-
-*6 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### A real bug is not necessarily the reported bug
-
-A defect found while investigating a symptom is **evidence, not the answer**. Before
-offering it as the cause, check that it produces *exactly* the symptom described,
-including the details that sound incidental.
-
-Two confident wrong causes in a row on rfp#196 — a layer missing from a map theme
-(a real bug, fixed) and a sub-pixel geometry (a real measurement). Both true;
-neither explained the report. The actual cause was draw order, and the user named it
-himself. The discriminating fact was in his words all along: *"as soon as I stop
-tracking I can't see the track"* rules out both theories in one line.
-
-Finding a genuine defect feels like finding *the* defect — the relief of having an
-explanation is what stops the check. Write the reported symptom out and ask whether
-the proposed cause produces **all** of it. Say which parts are still unexplained:
-"this is a real bug and it may not be your bug" is honest and cheap.
-
-### An enumeration is not a checklist
-
-A probe listing what exists — subkeys present, columns found, files listed — answers
-"what is here", never "what do we want". Scope arriving this way looks
-evidence-backed, so it survives review.
-
-On rfp#68, "the two Mergin subkeys that exist" became "the settings to verify",
-then an item on a field checklist a human had to walk outdoors to complete. Nothing
-in the codebase read or wrote `PhotoNaming`. Before a probe's output becomes work,
-grep for each item and ask whether anything consumes it. When it duplicates
-something already done another way, name the comparison — the existing approach
-usually wins for a reason worth stating.
-
-
-### A relative descriptor is meaningless without its anchor
-
-"Upstream", "downstream", "above", "below", "before", "after", "parent" — each is
-relative to something named **elsewhere in the document**, often paragraphs away and
-sometimes only in a table. Resolve the anchor before drawing any inference from the
-term.
-
-Getting it wrong does not produce uncertainty, it produces a confident and specific
-wrong answer — and it fails in the worst direction, because you now believe you have
-*evidence* against a claim rather than merely lacking evidence for it.
-
-Measured 2026-09-02. A field report read *"downstream sampling confirmed the presence
-of coho"*. Taken as downstream of the crossing under discussion, it appeared to
-disprove the user's recollection that coho were present above that crossing. The
-sampling site was actually at a road crossing 1.5 km further up the stream, so its
-"downstream" was still **1.1 km above** the crossing in question — the claim was true
-and the correction nearly removed it from an email to the infrastructure owner, on the
-one point the email existed to make.
-
-**Where a source describes a sequence — crossings on a stream, releases in a
-changelog, stages in a pipeline, commits on a branch — write the order out before
-interpreting a single relative term in it.** The ordering is usually one sentence in
-the source and takes seconds to find; the inference built on the wrong anchor survives
-every later check, because nothing downstream re-examines it.
-
-
-### A safeguard whose mechanism is a human reading a diff is not a control
-
-When a design says "the writes are uncommitted, so the diff is the review", check
-whether anyone reads diffs. Here nobody does — the user says "commit" without opening
-one, stated plainly and confirmed 2026-08-28 — so every per-action confirmation loop
-built on that premise was latency wearing the costume of a control. Two skills had one.
-
-Gate on **blast radius** instead, because that fires without anyone reading anything: a
-write that reaches one repo just happens; a write that reaches every repo (a soul
-convention) may be appended to freely but edited or removed only through an issue. Where
-a real check is needed, make it mechanical — a grep for a contradicting rule, an
-assertion that nothing above the `CLAUDE.md` marker moved, a guard that resolves every
-heading against a base SHA. Those are the controls; a prompt is not.
-
-The user still wants a short, honest account of what was written. That is a report, not a
-review, and confusing the two is how the loops got built.
-
-### Not finding it is not evidence it does not exist
-
-Before building a fetcher, harvester, backup or sourcing routine, **search the sibling
-packages for the verb**. One command, and it is the difference between adding a function
-and adding a second copy of one.
-
-```bash
-# Enumerate the org's installed packages rather than listing them: a hardcoded list
-# named four packages; thirteen other org packages were installed on the machine this
-# was measured on (2026-09-05), and the gap will grow again. Match
-# on any URL-ish field, case-insensitively: RemoteUsername is set only by GitHub
-# installs (a package installed from a local checkout has none) and the org name is
-# not always cased the same. Forks of upstream packages come along; that is fine.
-# `collapse` matters: paste() over fields that are all NULL is character(0), and
-# `if` on a zero-length grepl() aborts the whole enumeration (measured, soul#171).
-for p in $(Rscript -e 'for (p in rownames(installed.packages())) {
-  d <- packageDescription(p)
-  u <- paste(c(d$URL, d$BugReports, d$RemoteUrl, d$RemoteUsername), collapse = " ")
-  if (grepl("newgraphenvironment", u, ignore.case = TRUE)) cat(p, "\n") }'); do
-  echo "== $p"; grep -E "^export" "$(Rscript -e "cat(system.file(package='$p'))")/NAMESPACE" \
-    | grep -iE "source|fetch|harvest|backup|manifest|download|ingest|store|snapshot|read|write|conform"
-done
-ls ~/Projects/repo/rtj/scripts/gis/     # operational drivers live here, not in a package
-```
-
-**Then read the README ownership table and the above-marker `CLAUDE.md` of any package
-plausibly adjacent — exports understate remit.** A package README can state a remit no
-export names: that it exists so a report does not have to harvest its own copy, that it
-pins per-snapshot sources, schema, md5 and row count. The grep finds functions; the README
-is the load-bearing artifact, and it is the one nothing prompts you to open.
-
-The failure is not carelessness — it is that **a decision is invisible from where the work
-is happening**. The tool exists, is correct, and is three repos away in a directory you had
-no reason to open. So the path of least resistance builds it again, and the duplicate is
-plausible precisely because the original was never visible.
-
-**Tell:** you are about to write something whose name is a verb the ecosystem already does
-somewhere. Fetch, sync, harvest, backup, source, register, publish.
-
-Two corollaries worth holding:
-
-- **A function existing in two places is worse than it existing in neither.** Two live
-  copies drift silently, and the drift is invisible until someone has both installed.
-- **Check what the *architecture* says, not just what exists.** Not every instance is
-  duplicate code; a wrong-home *proposal* is the same failure, and an issue that already
-  assigned the boundary settles it for less than arguing from first principles costs.
-
-Sibling of *"An inventory is only complete relative to a boundary"* in `code-check.md`, one
-step earlier: that one is about a search that was complete for the wrong scope, this is
-about never having searched the scope where the answer lived.
-
-*26 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-#### The storage version: one store is not the world
-
-The same error with buckets instead of packages. The shape is a single negative check
-reported as a fact.
-
-The most general case: **`aws s3` and `s3cmd` address different clouds and are invisible to
-each other.** A repo whose backup script uses `s3cmd` has stores that no `aws s3 ls` will
-ever list, so "I checked S3" is not a statement about where the data is.
-
-Two habits, each one command:
-
-- **Enumerate the stores before searching them.** `s3cmd ls` and `aws s3 ls` with no
-  argument each list only their own provider's buckets; the backup script names the rest.
-- **Prefer the definition to the artifact.** The job that stages data says what exists; a
-  bucket only shows what some past run happened to leave.
-
-A negative result is only ever as wide as the store you looked in. Stating it without that
-qualifier is how a gap in your own search becomes a fact in an issue body.
-
-And the same shape once more for **checkouts**: a `grep` across `~/Projects/repo` searches
-the repos this machine happens to have, not the ecosystem. Repos are cloned per-machine and
-the set differs between them, so a local grep that returns clean has answered a question
-about this disk. Use `gh api -X GET search/code -f q="org:NewGraphEnvironment <term>"`,
-and note it indexes **default branches only**, so a file on a feature branch is invisible to it
-and needs `gh api repos/<owner>/<repo>/contents/<path>?ref=<branch>`.
-
-*12 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-#### The temporal version: what you build against may be about to change
-
-The spatial miss above builds a duplicate. The temporal miss builds something correct
-against an artifact another repo has already decided to restructure. **Before a design
-depends on a peer repo's artifact** (a guard comparing against its files, an extractor
-reading its output, automation keyed to its layout), **search the peer repo's open issues
-and PRs for work that changes it**, and read the body of each adjacent hit, not only its
-title. Unquoted words match anywhere; a quoted phrase must match exactly and misses rewordings.
-A full 100 rows means the list was cut: narrow the words.
-
-```bash
-gh search issues --include-prs --repo NewGraphEnvironment/<peer> --state open --limit 100 <artifact words>
-```
-
-*6 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-## 8. Decisions Up Front, Then Run
-
-**Ask at the plan gate. After approval, run to the PR. Before a plan exists, a question wants an answer.**
-
-The first three subsections are one rule on one axis — *when* to come back to the
-user — and they are only correct as a set; each was learned separately in a different
-repo and re-derived, usually by getting one of them wrong first. The rest are
-handover rules that belong beside them because they decide what the user is handed
-when you do come back.
-
-### After plan approval, run every phase to the PR
-
-Plan approval is the authorization for every mechanical step after it. Run every
-phase, commit atomically per phase, archive the PWF, push, open the PR, and report
-**once**, at the end. Do not stop between phases to report progress: the decisions
-that needed the user were taken at the gate, and a check-in that only reports
-spends attention already committed. Under **Always Away** the cautious answer is the
-wrong one — the work stalls on a question the user answered by approving the plan.
-
-The instruction arrives as one short message covering many commits, reviews and
-repos: *"Go all phases to PR"* (airvine). **The merge is a separate instruction** — *to the PR*
-ends at the open PR, and `/gh-pr-merge` runs when the user invokes it or the
-instruction says so.
-
-Two things are inside the mandate; these are not:
-
-- **Correcting the plan is inside it.** A review that disproves an approved design
-  decision gets fixed mid-run and reported in the summary; that is the run working,
-  not a reason to stop — unless the correction is itself a fork of the kind below (a
-  key, an identifier, a schema), which goes back to the user. Blockers that cannot be resolved are filed as issues and
-  named in the final report rather than held open.
-- **Our own repos are inside it.** Filing issues, opening PRs and editing bodies in
-  NGE repos is normal work.
-- **Outward-facing actions are not** — see "Never post outside our own repos" below.
-  Neither is anything a convention names as its own gate: the merge (airvine, 2026-09-05;
-  `gh-pr-push/SKILL.md`, "Ask user before merging"), a change to the machine
-  (`newgraph.md`, "State the plan before changing the machine"), or a push into an
-  artifact a human is testing on (`code-check.md`). A push to the feature branch is
-  inside the mandate.
-
-*7 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### Before a plan exists, a question wants an answer
-
-The same terseness that means "go" after approval means "answer me" before it. A
-turn that ends in a question mark, with no approved plan, gets an answer and a
-one-line offer of the work — not the first commit toward it. Twice in one day
-(floodplains, 2026-09-02) a question was read as approval and editing started — once
-after *"why not fix before publish?"*, and once after a gap had been explained, stopped
-with *"do not take on 70. i want to understand"*. When the ask is to understand something, keep it short and concrete; a
-worked example beats a taxonomy. *"small answers here"*, *"keep it short"* (airvine).
-
-This is the boundary condition on the rule above, which is why they are one section:
-a standing mandate to run autonomously, stated alone, is exactly what reads every
-terse message as "go". **The mandate starts at plan approval.**
-
-### What still interrupts, and where it goes
-
-A decision that permanently shapes stored data — a key, an identifier, a schema
-choice, a deprecation shim versus a hard rename — is the user's, and it goes to the
-**plan gate**, batched, as two or three concrete options with the recommended one
-first and the consequence stated. Two such forks put at one gate (flooded#47) were
-both load-bearing and neither was derivable from the issue: the rename would also
-have broken a production driver in another repo, which only the sweep surfaced.
-Asked at the gate a fork costs one round-trip and buys the whole run; discovered
-mid-execution it costs a stall with nobody there to answer it. Found mid-run, it is
-still not the agent's to decide: ask it the same way — options, recommendation first,
-phone-answerable — commit, and continue on the phases that do not depend on it while
-the answer is outstanding (`planning.md`, "When Something Keeps Failing" — escalating
-is not stopping).
-
-During plan-mode exploration, keep a list of "this changes what I build" forks and
-ask them together before `ExitPlanMode`. Questions are welcome; status updates are
-not. Mechanism — whether to spawn reviewers, which regex, how to build a fixture — is
-never a question (§6, "Spawning is your call"), and anything with a conventional
-default is not one either: pick it, say so, move on.
-
-### Never post outside our own repos without approval
-
-Never post to a venue outside NGE's own repositories without the user's explicit
-approval for that specific post — upstream GitHub issues and PR comments, mailing
-lists, forums, third-party trackers. **Drafting is welcome and expected**: write the
-comment, show it, wait. It is the sending that needs the word. *"Never post things
-upstream without my explicit approval"* (airvine, 2026-09-02, after an offer to draft
-comments on two of a vendor's upstream issues).
-
-**Why:** an upstream comment is published under the organisation's name to a venue we
-do not control, is indexed immediately, and cannot be unpublished. It is a
-communications act, not an engineering one, and the judgement about tone, timing and
-what we are willing to say in public is the user's.
-
-- Our own repos are unaffected; filing and editing issues there is the standing
-  disposition and needs no asking.
-- **Reading upstream is unrestricted and worth doing.** Checking issue state before
-  filing ours has caught a wrong citation in our own roxygen and found an upstream
-  issue already proposing the feature we were about to request.
-- Offer the draft in the reply, not as a fait accompli, and say plainly that nothing
-  has been posted when the work obviously produced something postable.
-
-### Auto mode refuses a production write whatever the chat says
-
-Auto mode's classifier can refuse a command as a production write: a live store rewritten,
-a deploy, a publish. When it does, approval given in chat does not reach it, and in the
-recorded case a restart did not clear it either. On the **first** such refusal, say so once and offer two routes:
-the user leaves auto mode for that step (Shift+Tab) and approves the prompt, or runs the
-bare command themselves (below). Do not retry, and do not suggest a restart.
-
-It is not the secret-read clamp (`newgraph.md`, "Reading a secret clamps the rest of the
-session"), which names *earlier conversation content* and needs a restart. This refusal
-names a **category** of action, such as "Production Deploy".
-
-*4 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### Hand the user bare commands
-
-When the user must run a command themselves — an interactive login, a
-sudo-needs-TTY operation, anything the Bash tool is blocked from running — give the
-**bare command**, in a fenced block, ready to paste. Never prefix it with `!`.
-*"Give me the cmd without the ! - that never works btw"* (airvine, 2026-08-21);
-*"stop giving me the ! at the start. that doesn't work. i need the raw cmd"* (`cd`, 2026-08).
-
-**Why, twice over.** Default session guidance proposes the `!` prefix as a way to run
-a command in-session, so this recurs in every repo unless written down. On this
-operator's terminals it either does not run at all, or — where it does — **it ran from
-`$HOME` rather than the session's working directory** (one measurement, 2026-09-02), so a
-handed-over relative path created the file somewhere nobody was looking. Absolute paths are right whichever
-directory it resolves against. So:
-
-- Emit the command plain. Applies to fenced blocks and inline commands alike.
-- **Anchor every path**, whichever form the user ends up running it in: absolute
-  (`~/Projects/repo/<repo>/…`), or relative after `cd ~/Projects/repo/<repo> &&` on the
-  **same** line, so a failed `cd` runs nothing. The second form keeps a log target short.
-- Keep it paste-safe: prefer `grep`/`awk` over a nested `python3 -c "…"` inside a
-  single-quoted remote command, so the quoting survives the trip.
-- **Keep each line short enough not to wrap**, one command per line: a wrapped line can
-  paste as two commands. Say what the first line of output must read (for example
-  `PUBLISH run`), so a dropped flag that enables a write shows before anything is written. A
-  dropped guard (`--dry-run`, a scope flag) writes at once, which is one more reason not to wrap.
-
-**A file under `~/Downloads` may be unreadable by the agent process: macOS grants that access
-per app, per machine. Probe before assuming either way:**
-
-```bash
-ls ~/Downloads >/dev/null 2>&1 && echo readable || echo blocked
-```
-
-If it prints `readable`, read the file where it is. If it prints `blocked`, `Read`, `cp` and
-`pdftotext` on `~/Downloads/*` all fail with `Operation not permitted`. That block is macOS
-folder protection (TCC) on the process, not a Claude Code permission mode, so `/permissions`
-does not change it. Desktop and Documents are protected the same way but granted separately,
-so probe each one. Do not retry variants: ask for
-**one** copy into the repo, with absolute source and destination paths, then continue from
-the copy. Granting the terminal app Full Disk Access removes the block for that app.
-
-*10 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### Link every issue and PR you name to the user
-
-When a message to the user names an issue or a PR, make the number a link the user can
-click: `[soul#191](https://github.com/NewGraphEnvironment/soul/issues/191)`,
-`[soul PR #192](https://github.com/NewGraphEnvironment/soul/pull/192)`. Terminal output
-renders markdown, so a bare `#191` costs the user a browser, a repo, and a click through
-several pages to learn what it was — for every number in a report that may carry a
-dozen. *"want to be able to follow up without opening new browser and clicking through
-mult pages to find"* (airvine, 2026-09-05).
-
-- **Issues under `/issues/N`, pull requests under `/pull/N`.** They are different paths,
-  and the type is not always obvious from a number. When unsure, ask `gh` rather than
-  guess — it returns the canonical URL for either:
-  ```bash
-  gh issue view 192 --repo NewGraphEnvironment/soul --json url -q .url \
-    || gh pr view 192 --repo NewGraphEnvironment/soul --json url -q .url
-  ```
-- **Cross-repo references carry the repo**: `rfp#268`, never a bare `#268` from inside
-  soul.
-- **A bare `#N` is not ambiguous — it is a working link to the wrong repo.** The host
-  resolves it against the session's own repo, so a bare number in a discussion *about* a
-  different repo silently retargets, and the wrong repo's issue of that number can be close
-  enough in subject to read as correct. Naming the collision in prose afterwards does not
-  fix it; the link has to be re-qualified.
-- **Spot-check a subset, not every link.** Before sending a report with many numbers,
-  resolve two or three through `gh` — the ones you typed from memory or whose type you
-  inferred — and let the rest ride. Checking all of them would slow every message; checking
-  none is how a wrong repo or an issue-path link to a PR ships.
-- **Scope is messages to the user** — terminal replies, the compact-prep report, PR and
-  issue bodies where a reader lands from outside the repo. Commit messages and issue bodies
-  read *on* GitHub autolink `#N` already; do not bloat those.
-
-*5 lines of evidence for this rule are in `conventions/karpathy.md`, which `/code-check` reads in full.*
-
-### Surface upstream defects; do not work around them
-
-When a dependency or an external API misbehaves, surface it and ask rather than
-coding around it. *"dont' do workarounds for things like zotero api problems. surface
-and ask as there may be simple solution"* (airvine, 2026-09-03).
-
-**Why:** a workaround hides the defect from whoever could fix it properly, and the user
-often has upstream context or a simple fix the session lacks. Most of the dependencies
-in question are **first-party** — an upstream bug is usually ours — so a local patch
-is strictly worse than an issue: it leaves the bug in place for every other consumer
-while making this repo look fine. Same instinct as `newgraph.md`'s "install missing
-packages, don't workaround", applied to a *broken* dependency rather than a *missing*
-one.
-
-**How to apply:** reproduce it minimally, file an issue in the owning repo with the
-repro and the exact lines, report it, and carry on if it is not blocking. The rule is
-*do not hide it*, not *do not continue*: the day it was recorded, a search function
-failed on a list column and broke a documented pipeline step; the local guard would
-have taken minutes and hidden a bug affecting every consumer, so it was filed with a
-three-line repro and the pipeline continued, since its data path did not use search.
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
@@ -2407,14 +2111,14 @@ Skip planning for single-file edits, quick fixes, or tasks with obvious next ste
 
 ## The Workflow
 
-1. **Explore first** — Enter plan mode (read-only). Read code, trace paths, understand the problem before proposing anything. When the work codifies a pattern that already exists in multiple places (reference implementations across repos), read **every** reference in full, not just the canonical one — variation across references surfaces patches before v0.1 instead of as churn later (soul#52: reading all 4 references preempted 5 of the 7 fixes a dry-run would have found). Don't substitute Explore-agent summaries for direct reads; agents sometimes report existing files as absent.
+1. **Explore first** — Enter plan mode (read-only). Read code, trace paths, understand the problem before proposing anything. When the work codifies a pattern that already exists in multiple places (reference implementations across repos), read **every** reference in full, not just the canonical one — variation across references surfaces patches before v0.1 instead of as churn later (measured: reading all 4 references preempted 5 of the 7 fixes a dry-run would have found). Don't substitute Explore-agent summaries for direct reads; agents sometimes report existing files as absent.
 2. **Plan to files** — Write the plan into 3 files in `planning/active/`:
    - `task_plan.md` — Phases with checkbox tasks
    - `findings.md` — Research, discoveries, technical analysis
    - `progress.md` — Session log with timestamps and commit refs
 3. **Plan-review with the Plan agent — concurrently, not as a gate** — Once `task_plan.md` is scaffolded, spawn the Plan subagent (`Agent({subagent_type: "Plan", prompt: "..."}`) and ask it to critically review the task_plan against the issue body + actual codebase. Categorize findings as Blocker / Gap / Ordering / Assumption / Scope / Acceptance. The agent reads files fresh — it catches what you miss when you've been thinking about the design too long. Real example: caught 21 issues including hardcoded literals across 4 files not listed in the plan, untested DB column mismatches, and a baseline-cache-shadow that would have produced a 6-second no-op run.
 
-   **Do not wait for it.** Spawn, then start the lowest-risk phase. Background agents have repeatedly returned late — in one case after the entire issue had shipped — so treating the review as a precondition stalls the work for as long as the agent takes (see `karpathy.md` §6). Fold findings in whenever they land: pre-baseline they edit the plan; mid-implementation they become follow-up commits — unless the finding is a stored-data fork of the kind `karpathy.md` §8 reserves for the user. A review that arrives after the code is written is not wasted — the reviewer reads real code instead of a plan, which is how one late review still contributed three fixes that no earlier reading had found. If you genuinely cannot proceed without the result, run it with `run_in_background: false` so the blocking is explicit.
+   **Do not wait for it.** Spawn, then start the lowest-risk phase. Background agents have repeatedly returned late — in one case after the entire issue had shipped — so treating the review as a precondition stalls the work for as long as the agent takes (see `agent-operations.md` §2). Fold findings in whenever they land: pre-baseline they edit the plan; mid-implementation they become follow-up commits — unless the finding is a stored-data fork of the kind `agent-operations.md` §4 reserves for the user. A review that arrives after the code is written is not wasted — the reviewer reads real code instead of a plan, which is how one late review still contributed three fixes that no earlier reading had found. If you genuinely cannot proceed without the result, run it with `run_in_background: false` so the blocking is explicit.
 
    Verify before acting, in both directions. Findings have been confidently wrong (a "BLOCKER" disproved by a 30-second probe) and confidently right about things nobody suspected. Reproduce the claim first.
 
@@ -2439,7 +2143,7 @@ Skip planning for single-file edits, quick fixes, or tasks with obvious next ste
 
    That mis-spawn is what produced the silent-delivery failures below, so check `name` before suspecting settings. Teammate mode (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` + `teammateMode`, merged globally from `soul/settings/defaults.json`) shapes what a *named* spawn becomes; it is not by itself why findings go missing, and an unnamed spawn delivers fine with it enabled.
 
-   **Get the findings into a file — but check who is doing the writing.** Message delivery has silently failed twice: one review arrived as idle notifications with no content, and one was routed to a different session on the user's phone, surfacing only because the user mentioned it. From this side an idle ping is indistinguishable from an agent that had nothing to say, so the loss is invisible. A file (`planning/active/review-<N>.md`) survives routing, survives the agent exiting, and is greppable later. One path per **spawn**: a replacement gets its own, because the original may still deliver into the one it was given, and a missing file reads as a lost review only after the completion notification or the deadline in `karpathy.md` §6, "Don't trust status".
+   **Get the findings into a file — but check who is doing the writing.** Message delivery has silently failed twice: one review arrived as idle notifications with no content, and one was routed to a different session on the user's phone, surfacing only because the user mentioned it. From this side an idle ping is indistinguishable from an agent that had nothing to say, so the loss is invisible. A file (`planning/active/review-<N>.md`) survives routing, survives the agent exiting, and is greppable later. One path per **spawn**: a replacement gets its own, because the original may still deliver into the one it was given, and a missing file reads as a lost review only after the completion notification or the deadline in `agent-operations.md` §2, "Don't trust status".
 
    **The `Plan` and `Explore` agent types have no Write tool, so they cannot write that file.** Both plan reviews on 2026-08-26 (gq#61, gq#40) were instructed to and were structurally unable to; one said so outright — *"I have no Write/Edit tools and am explicitly barred from creating files; an agent instruction can't lift that"* — and returned the full review as reply text instead. Both arrived intact, ~26 findings each. So:
 
@@ -2457,12 +2161,12 @@ Skip planning for single-file edits, quick fixes, or tasks with obvious next ste
    when asked. Then snapshot the files you care about and `cmp` them before **and after**
    every run whose result you intend to act on, so "the tree was intact for this
    measurement" is a fact rather than an assumption. Same hazard as a mid-flight edit in
-   `karpathy.md` §5, arriving from an agent instead of from you.
+   `agent-operations.md` §1, arriving from an agent instead of from you.
 
    **Review the fixes, not just the code.** The second pass is where the value concentrates, because a fix written under a wrong assumption reproduces the same defect. Measured on gq#52: pass 1 found 13 defects, pass 2 found 7 more — including a blocker sitting *inside the fix* for pass 1's blocker, the same class twice (`lty`, then `fill_alpha`) because completeness was reasoned about rather than computed. Pass 3, scoped narrowly to the file edited most, found no new instances; **convergence is the signal to stop, not a fixed number of rounds.**
 
    Convergence is measured, not felt — a quiet round and an exhausted reviewer look
-   identical. The rule that terminated trap#28 (five rounds; each of the first four
+   identical. The rule that terminated one package's review (five rounds; each of the first four
    found its best defect *inside the previous round's fix*) was to **enumerate the
    candidate set mechanically and show nothing sits above its source of truth**: parse
    the files and walk every `cli_abort`/`warning`/`stop` rather than recalling them, so
@@ -2476,7 +2180,7 @@ Skip planning for single-file edits, quick fixes, or tasks with obvious next ste
    Ask for the **mechanism**, not more instances. Pass 3's best finding was that an invariant was enforced by two lists happening to agree — which is what had produced instances two and three.
 
    The thing reviewers catch that self-probing does not is **interop**: 18 tests inspected a legend object and none handed it to the renderer, which rejected it outright. Ask the consumer.
-4. **Lock naming before the baseline** — If naming feedback surfaces during planning (legacy filename, inconsistency with an existing file family), fold the rename into the convention + task_plan BEFORE the baseline commit, not as a follow-up. Pre-baseline it's free; retrofitting after implementation cascades (soul#52: `build_exec_pdf.R` → `run_pagedown_exec_summary.R` locked in pre-baseline meant zero downstream rework).
+4. **Lock naming before the baseline** — If naming feedback surfaces during planning (legacy filename, inconsistency with an existing file family), fold the rename into the convention + task_plan BEFORE the baseline commit, not as a follow-up. Pre-baseline it's free; retrofitting after implementation cascades (measured: `build_exec_pdf.R` → `run_pagedown_exec_summary.R` locked in pre-baseline meant zero downstream rework).
 5. **Commit the plan** — After Plan-agent review + fixes. This is the baseline.
 6. **Work in atomic commits** — Each commit bundles code changes WITH checkbox updates in the planning files. The diff shows both what was done and the checkbox marking it done.
 7. **Code check before commit** — Run `/code-check` on staged diffs before committing, or once over the branch with `/code-check branch` before the PR (`feature-workflow.md`, "When to Skip"). Per commit, don't mark a task done until its diff passes review. In branch mode each commit still carries its own checkbox flip (Atomic Commits, below), the Validation box for `/code-check` is the one that waits for the branch review, and its fixes land as follow-up commits.
@@ -2559,7 +2263,7 @@ copy of any of it.
 
 Existing dated files — `20260711_…`, `…_2026_05_25.md` — are **not renamed**. They are
 cited by path from `CLAUDE.md` files and from other conventions (`bookdown.md`,
-`karpathy.md` §7), and a rename breaks the citation the way it breaks log evidence
+`agent-operations.md` §3), and a rename breaks the citation the way it breaks log evidence
 (`newgraph.md`, "Which logs to commit"). Convergence is forward-only, and the README says
 when.
 
@@ -2581,7 +2285,7 @@ is the minimal form:
   section is re-verified alone. A research file whose numbers cannot be re-derived ages
   into folklore, and one that states a scope or a quantity drifts silently when the code
   moves — three link documents, two of them research files, asserted a recompute "runs over
-  every WSG in the schema" after two commits had changed it (`karpathy.md` §7, "Documents
+  every WSG in the schema" after two commits had changed it (`agent-operations.md` §3, "Documents
   that share an ancestor corroborate nothing"). When code changes a behaviour a research
   file describes, grep `research/` for the sentence. Files written before 2026-09-06 gain
   the line when next revised; no fleet sweep is required.
@@ -2787,7 +2491,7 @@ repeating itself.
 
 When a failure does generalize, it graduates to the convention that owns its
 class: the `code-check*.md` family for a bug class in a diff — `code-check.md` for a
-mechanism, `-shell`, `-r`, `-spatial` or `-infra` for a tool quirk — `ci-monitoring.md` for CI
+mechanism, `-shell`, `-r`, `-python`, `-spatial` or `-infra` for a tool quirk — `ci-monitoring.md` for CI
 behaviour, the domain convention otherwise.
 
 ## Skills
@@ -2797,3 +2501,52 @@ behaviour, the domain convention otherwise.
 | `/planning-init` | First time in a repo — creates directory structure |
 | `/planning-update` | Mid-session — sync checkboxes and progress |
 | `/planning-archive` | Issue complete — archive and create fresh active/ |
+
+# Python Conventions
+How New Graph Environment repos declare and run Python, the sibling of `r-packages.md`.
+
+*Index only: each rule's heading and first sentence. The full text is `~/Projects/repo/soul/conventions/python.md`; read it before writing or reviewing code in its area.*
+
+### Declare dependencies in `pyproject.toml` and commit `uv.lock`
+A repo whose Python is a package, or whose scripts import a shared module of the repo's own, declares its dependencies in `pyproject.toml`, commits the `uv.lock` that `uv lock` writes, runs through `uv run`, and adds no `environment.yml`.
+
+### A loose script carries its dependencies inline
+A standalone script that imports no module of the repo's own declares its third-party imports in PEP 723 inline metadata and runs with `uv run --script`; one that imports only the standard library needs none.
+
+### Two exceptions, each named in the repo's `CLAUDE.md`
+Conda stays where a conda-forge binary that has no wheel is load-bearing, and PyQGIS scripts declare nothing, because QGIS's own interpreter runs them.
+
+### Never `conda run -n` an environment the repo does not declare
+A script that runs `conda run -n <env>` against an environment declared in no file of its own repo cannot run from a fresh clone, so declare the dependencies here instead.
+
+# Writing a README
+A README tells a stranger what a package is, why it is worth their time, and how to try it, in that order and in the fewest words that stay true.
+
+*Index only: each rule's heading and first sentence. The full text is `~/Projects/repo/soul/conventions/readme.md`; read it before writing or reviewing code in its area.*
+
+### Open with what the package is and why it is valuable, not with a list of features
+Open with one to three sentences on what the package is, what data it works on, and why that is valuable, with the restoration planning, implementation or monitoring decision it informs where there is one.
+
+### Write the tagline, the description field, the GitHub About and the opening together
+Change the README tagline, the DESCRIPTION `Title` (or a Python package's pyproject `description`) and the GitHub About text together so they say the same thing, and keep the DESCRIPTION `Description` and the README opening in step with each other.
+
+### Show a little code and its real output, a figure of real output, or both
+Show the package working instead of listing what it can do: a figure of real output where the output is spatial or visual, a short example with the output it really prints, or both.
+
+### Describe nothing that is not fully built
+Leave out every capability that has not shipped, including partly built ones and those framed as a target, a next iteration or a roadmap; add each one when it ships.
+
+### Check each claim against the code path a run takes
+Before a README sentence is published, find the code path a real run takes for it, and check that every "every", "each", "both" or plural holds for every member of the set it names.
+
+### Sections run in a fixed order
+Order a README as: name, hex sticker, a lifecycle badge while unstable, and tagline; the opening; the figure; Installation; the example; Learn more; Ecosystem; Data and methods it builds on; Citation, License and NOTICE.
+
+### State development status with a lifecycle badge, not a warning in the prose
+Mark an unstable installable package with a lifecycle badge under the title, and after the install command say that functions change between releases, link NEWS, and show how to pin a release.
+
+### A README figure of output is made by committed code
+Make every README figure of the package's output from a committed script that runs on real data, check it at its published width, give it alt text and a short caption saying what it shows, and style a map through gq.
+
+### Leave out what another file already keeps
+Leave out roadmaps, changelogs, function tables, version strings in prose, counts of published things, and internal hosts or private repos, because each is kept somewhere else and goes stale in a README.
