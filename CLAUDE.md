@@ -94,8 +94,7 @@ Run end-to-end: `bash scripts/run_pipeline.sh [aoi_id ...]`
 **pgstac registration, after the sync** (#42), is the
 [`stacs`](https://github.com/NewGraphEnvironment/stacs) package, pinned to a tag in
 `pyproject.toml` (`[tool.uv.sources]`) and locked in `uv.lock`. `stacs.toml` declares the catalogue: API, collection id, bucket, the
-required `thumbnail` asset, and the STAC host it writes through (`root@geopro`, over the
-tailnet). `tests/test_stacs_config.py` pins the collection id, bucket and asset key to
+required `thumbnail` asset, and the STAC host it writes through. `tests/test_stacs_config.py` pins the collection id, bucket and asset key to
 `05_stac_register.py`; the API and the host are in no module, so only a live run checks
 them. From the repo root:
 ```bash
@@ -113,7 +112,7 @@ run touched few.
 `verify` compares every body in both directions and, unlike `register`, fails on
 orphans: ids still registered but no longer published. `--dryrun` on `--mode all` reads
 only `collection.json` and probes neither the API nor the host.
-Not rtj's `stac_register-pypgstac.sh`: it DELETEs the collection before reloading, and
+Not the infrastructure repo's `stac_register-pypgstac.sh`: it DELETEs the collection before reloading, and
 `pgstac.items.collection` cascades, so a failure between the two leaves the API empty
 (2026-08-29).
 
@@ -132,11 +131,11 @@ outcome, reconciled against the centroid cache. `data/reports/<id>.md` renders
 from it.
 
 The only database the pipeline touches is fwapg, for the Neexdzii Kwa watershed polygon
-(`fresh::frs_watershed_at_measure()`). The local `fresh-db` container serves it; point
-`fresh` at it for one run without editing `~/.Renviron`:
+(`fresh::frs_watershed_at_measure()`). Point `fresh` at any fwapg instance for one run,
+bypassing the user R environ file:
 ```bash
-R_ENVIRON_USER=/dev/null PG_HOST_SHARE=localhost PG_PORT_SHARE=5432 PG_DB_SHARE=fwapg \
-  PG_USER_SHARE=postgres PG_PASS_SHARE=postgres Rscript scripts/01_fetch.R neexdzii_kwa
+R_ENVIRON_USER=/dev/null PG_HOST_SHARE=<host> PG_PORT_SHARE=<port> PG_DB_SHARE=fwapg \
+  PG_USER_SHARE=<user> PG_PASS_SHARE=<password> Rscript scripts/01_fetch.R neexdzii_kwa
 ```
 
 ### Embedded COG metadata
@@ -254,8 +253,8 @@ not item bodies, so a run that rebuilds only some items leaves the rest in their
 old shape on S3; `--require-all-published` refuses that.
 
 `file:checksum` (sha256 multihash, `1220…`) and `file:size` on the `thumbnail`
-asset, file extension v2.1.0. The measured tables are imported from the private
-`stac_orthophoto_bc` by `data-raw/tables_import-georef_validate.R`, which stamps
+asset, file extension v2.1.0. The measured tables are imported from a private
+orthophoto catalogue repo by `data-raw/tables_import-georef_validate.R`, which stamps
 the source commit on line 1 of each CSV.
 
 Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
@@ -319,7 +318,7 @@ Measured over all 9,976 published items, 2026-09-07: `georef_metadata` true on
 - **Check the cold path when measuring georeferencing.** A re-run over a
   populated tree reuses GeoTIFFs whose manifest inputs match, so it reports
   success for frames it did not write this run.
-- `stac_register-pypgstac.sh` on geopro **deletes and reloads** from
+- The infrastructure repo's `stac_register-pypgstac.sh` **deletes and reloads** from
   `collection.json`, and aborts after the delete if any item fetch fails, leaving
   the collection empty. Register with `stacs register --config stacs.toml --mode all`
   instead (Pipeline, above).
