@@ -63,7 +63,7 @@ publish and geopro reload are a separate step after merge.**
 - [x] `/planning-archive`, `/gh-pr-push` (closes #23, #28, #29, #30)
 
 ## After merge, on your word (not in this PR)
-Back up the item JSONs → `04_s3_upload.R` → geopro reload → stac_orthophoto_bc#45 re-baselined.
+Back up the item JSONs → `04_s3_upload.R` → geopro reload → an internal issue re-baselined.
 
 ## Validation
 

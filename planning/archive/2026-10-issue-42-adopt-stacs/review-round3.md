@@ -163,7 +163,7 @@ another). Source lines are v0.1.1 unless they name a file in this repo.
 | 62 | 8 | no setting is a secret; the password stays on the host, named by `password_env` | T | cli.py:29-35 refuses `password`; register.py:257-262 |
 | 63 | 16-17 | every item carries its thumbnail COG; `visual` and metadata assets only where they exist | T | 05_stac_register.py:205 (always), 217 (`visual` conditional) |
 | 64 | 21 | host shared with stac_dem_bc: same machine, database and loader | T | stac_dem_bc `origin/main:stacs.toml` [transport] identical |
-| 65 | 22 | MagicDNS over the tailnet, root-only (rtj#193) | T | rtj#193 body: `/root/.ssh/authorized_keys`, no user account |
+| 65 | 22 | MagicDNS over the tailnet, root-only | T | an internal issue body: `/root/.ssh/authorized_keys`, no user account |
 | 66 | 23-24 | reserved IP is the same machine: `stacs register --config stacs.toml --host root@146.190.12.8 --mode all` | T, parses | cli.py:263 `--host`; `dig images.a11s.one` = 146.190.12.8 |
 | 67 | 25-34 | the transport keys | T, accepted | cli.py:32-33 `CONFIG_KEYS`; `pypgstac` a list (cli.py:123) |
 

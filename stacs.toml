@@ -19,7 +19,7 @@ require = "thumbnail"
 
 [transport]
 # The STAC host, shared with stac_dem_bc's catalogue: same machine, database and loader.
-# MagicDNS name over the tailnet, root-only by design (rtj#193). If the tailnet is the
+# MagicDNS name over the tailnet, root-only by design. If the tailnet is the
 # suspect, the DigitalOcean reserved IP is the same machine:
 #   stacs register --config stacs.toml --host root@146.190.12.8 --mode all
 host = "root@geopro"

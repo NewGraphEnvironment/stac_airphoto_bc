@@ -151,7 +151,7 @@ Rebuild on current fly, **0.12.0 or later** (0.14.1 on 2026-09-26). No version p
   2013 and 2019 (above), so digital is rebuilt once, on fly's digital path.
 - #30 (checksums, run provenance, item JSON kept before overwrite) lands first, so
   the rebuild is the first hashed upload.
-- NewGraphEnvironment/stac_orthophoto_bc#45: its "as published" baseline reads live S3 and must be
+- An internal issue: its "as published" baseline reads live S3 and must be
   frozen before this publishes.
 
 ## Notes

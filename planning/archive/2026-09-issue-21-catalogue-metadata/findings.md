@@ -5,7 +5,7 @@
 Issue #21's body says the change is "the same way #6 promoted `cog` from an asset field
 to a queryable item property". **This repo's #6 is "Initialize CLAUDE.md."** The real
 pointer is
-[stac_orthophoto_bc#6](https://github.com/NewGraphEnvironment/stac_orthophoto_bc/issues/6),
+an internal issue,
 whose implementation is `~/Projects/repo/stac_orthophoto_bc/scripts/item_cog_backfill.py`
 — a standalone patcher over published item JSONs that writes only to `--out-dir`, takes
 `--limit` for smoke runs, and errors on a partial write. That shape is what Phase 4
